@@ -20,6 +20,8 @@ final class AudioCaptureService {
     private let filter = FrequencyWeightingFilter()
     private var running = false
     private var currentSampleRate: Double = 48000.0
+    private var interruptionObserver: Any?
+    private var routeChangeObserver: Any?
 
     /// Frequency weighting filter applied to captured audio buffers.
     var weighting: FrequencyWeighting = .z {
@@ -30,6 +32,61 @@ final class AudioCaptureService {
 
     /// Level in dBFS and the duration represented by the buffer.
     var onLevel: ((Double, Double) -> Void)?
+
+    /// Raw PCM samples and sample rate for live spectrum analysis.
+    var onSamples: (([Float], Double) -> Void)?
+
+    init() {
+        setupSessionObservers()
+    }
+
+    private func setupSessionObservers() {
+        interruptionObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: audioSession,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleInterruption(notification: notification)
+        }
+
+        routeChangeObserver = NotificationCenter.default.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: audioSession,
+            queue: .main
+        ) { [weak self] notification in
+            self?.handleRouteChange(notification: notification)
+        }
+    }
+
+    private func handleInterruption(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+
+        switch type {
+        case .began:
+            if running {
+                engine.pause()
+            }
+        case .ended:
+            if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
+                let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+                if options.contains(.shouldResume), running {
+                    try? engine.start()
+                }
+            }
+        @unknown default:
+            break
+        }
+    }
+
+    private func handleRouteChange(notification: Notification) {
+        guard running else { return }
+        // Verify engine is still functional following hardware route change
+        if !engine.isRunning {
+            try? engine.start()
+        }
+    }
 
     func start() async throws {
         guard !running else { return }
@@ -74,7 +131,15 @@ final class AudioCaptureService {
         input.installTap(onBus: 0, bufferSize: 2048, format: format) { [weak self] buffer, _ in
             guard let self else { return }
             guard let channel = buffer.floatChannelData?[0] else { return }
-            let samples = UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength))
+            let frameCount = Int(buffer.frameLength)
+            let samples = UnsafeBufferPointer(start: channel, count: frameCount)
+
+            // Forward samples for real-time FFT spectrum analysis
+            if let onSamples = self.onSamples {
+                let sampleArray = Array(samples)
+                onSamples(sampleArray, format.sampleRate)
+            }
+
             self.filter.withFilteredSamples(from: samples) { filtered in
                 let level = SoundLevelCalculator.dbfs(samples: filtered)
                 self.onLevel?(level, Double(buffer.frameLength) / format.sampleRate)
@@ -101,6 +166,12 @@ final class AudioCaptureService {
     }
 
     deinit {
+        if let interruptionObserver {
+            NotificationCenter.default.removeObserver(interruptionObserver)
+        }
+        if let routeChangeObserver {
+            NotificationCenter.default.removeObserver(routeChangeObserver)
+        }
         if engine.isRunning { engine.stop() }
         engine.inputNode.removeTap(onBus: 0)
     }

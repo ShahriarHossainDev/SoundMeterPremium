@@ -1,23 +1,140 @@
 import SwiftUI
 
-struct RootTabView: View {
-    var body: some View {
-        TabView {
-            NavigationStack { CameraView() }
-                .tabItem { Label("Camera", systemImage: "camera") }
+enum AppTab: Int, CaseIterable {
+    case camera = 0
+    case dosimeter = 1
+    case meter = 2
+    case data = 3
+    case settings = 4
 
-            NavigationStack { DosimeterView() }
-                .tabItem { Label("Dosimeter", systemImage: "headphones") }
-
-            NavigationStack { MeterView() }
-                .tabItem { Label("Meter", systemImage: "gauge.with.dots.needle.67percent") }
-
-            HistoryView()
-                .tabItem { Label("Data", systemImage: "list.bullet.rectangle") }
-
-            SettingsView()
-                .tabItem { Label("Settings", systemImage: "slider.horizontal.3") }
+    var title: String {
+        switch self {
+        case .camera: return "Camera"
+        case .dosimeter: return "Dosimeter"
+        case .meter: return "Meter"
+        case .data: return "Data"
+        case .settings: return "Settings"
         }
+    }
+
+    var icon: String {
+        switch self {
+        case .camera: return "camera"
+        case .dosimeter: return "headphones"
+        case .meter: return "gauge.with.dots.needle.67percent"
+        case .data: return "list.bullet"
+        case .settings: return "slider.horizontal.3"
+        }
+    }
+}
+
+struct RootTabView: View {
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @State private var selectedTab: AppTab = .meter
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            TabView(selection: $selectedTab) {
+                NavigationStack { CameraView() }
+                    .tag(AppTab.camera)
+                    .toolbar(.hidden, for: .tabBar)
+
+                NavigationStack { DosimeterView() }
+                    .tag(AppTab.dosimeter)
+                    .toolbar(.hidden, for: .tabBar)
+
+                NavigationStack { MeterView() }
+                    .tag(AppTab.meter)
+                    .toolbar(.hidden, for: .tabBar)
+
+                HistoryView()
+                    .tag(AppTab.data)
+                    .toolbar(.hidden, for: .tabBar)
+
+                SettingsView()
+                    .tag(AppTab.settings)
+                    .toolbar(.hidden, for: .tabBar)
+            }
+            .ignoresSafeArea(edges: .bottom)
+
+            // Custom Floating Dark Pill Bottom Navigation Bar matching screenshot
+            CustomBottomTabBar(selectedTab: $selectedTab)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 6)
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { !hasCompletedOnboarding },
+            set: { if $0 { hasCompletedOnboarding = false } }
+        )) {
+            OnboardingView()
+        }
+    }
+}
+
+struct CustomBottomTabBar: View {
+    @Binding var selectedTab: AppTab
+
+    private let vibrantOrange = Color(red: 1.0, green: 0.44, blue: 0.18)
+    private let barBackground = Color(red: 0.07, green: 0.09, blue: 0.13)
+    private let selectedHighlight = Color(red: 0.02, green: 0.03, blue: 0.05)
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(AppTab.allCases, id: \.self) { tab in
+                let isSelected = selectedTab == tab
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        selectedTab = tab
+                    }
+                } label: {
+                    VStack(spacing: 3) {
+                        if tab == .meter {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .stroke(isSelected ? vibrantOrange : Color.white.opacity(0.85), lineWidth: 1.5)
+                                    .frame(width: 24, height: 18)
+
+                                Text("dB")
+                                    .font(.system(size: 9, weight: .bold, design: .rounded))
+                                    .foregroundStyle(isSelected ? vibrantOrange : Color.white.opacity(0.85))
+                            }
+                            .frame(height: 20)
+                        } else {
+                            Image(systemName: tab.icon)
+                                .font(.system(size: 20, weight: isSelected ? .bold : .medium))
+                                .foregroundStyle(isSelected ? vibrantOrange : Color.white.opacity(0.85))
+                        }
+
+                        Text(tab.title)
+                            .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                            .foregroundStyle(isSelected ? vibrantOrange : Color.white.opacity(0.85))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 9)
+                    .background(
+                        Group {
+                            if isSelected {
+                                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                    .fill(selectedHighlight)
+                                    .padding(.horizontal, 2)
+                            }
+                        }
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 36, style: .continuous)
+                .fill(barBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 36, style: .continuous)
+                        .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.45), radius: 14, x: 0, y: 6)
+        )
     }
 }
 

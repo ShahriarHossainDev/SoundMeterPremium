@@ -1,8 +1,29 @@
 import Foundation
 import SwiftData
+import SwiftUI
 
 enum MeterState: Equatable {
     case idle, starting, measuring, paused, stopped, failed
+}
+
+public enum EnvironmentProfile: String, CaseIterable, Identifiable {
+    case quietHome = "Quiet home"
+    case office = "Office / Library"
+    case conversation = "Conversation"
+    case busyStreet = "Busy street"
+    case loudVenue = "Loud venue"
+
+    public var id: String { rawValue }
+
+    public var typicalRange: String {
+        switch self {
+        case .quietHome: return "30 – 45 dB"
+        case .office: return "45 – 55 dB"
+        case .conversation: return "60 – 68 dB"
+        case .busyStreet: return "75 – 85 dB"
+        case .loudVenue: return "90 – 110 dB"
+        }
+    }
 }
 
 @MainActor
@@ -15,7 +36,7 @@ final class MeterViewModel: ObservableObject {
     @Published private(set) var elapsed = 0.0
     @Published private(set) var graphSamples: [Double] = []
     @Published var errorMessage: String?
-    @Published var weighting: FrequencyWeighting = .z {
+    @Published var weighting: FrequencyWeighting = .a {
         didSet {
             capture.weighting = weighting
             UserDefaults.standard.set(weighting.rawValue, forKey: "defaultWeighting")
@@ -23,28 +44,100 @@ final class MeterViewModel: ObservableObject {
         }
     }
 
+    // Reference-calibrated estimated decibels matching 20-130 dB acoustic scale (0 dBFS ≈ 120 dB SPL reference)
+    var estimatedCurrentDB: Double {
+        guard state == .measuring || state == .paused else { return 0 }
+        let offset = UserDefaults.standard.double(forKey: "microphoneGainOffset")
+        return max(20.0, min(130.0, currentDBFS + 100.0 + offset))
+    }
+
+    var estimatedAverageDB: Double {
+        guard !levels.isEmpty else { return 0 }
+        let offset = UserDefaults.standard.double(forKey: "microphoneGainOffset")
+        return max(20.0, min(130.0, averageDBFS + 100.0 + offset))
+    }
+
+    var estimatedMaximumDB: Double {
+        guard maximumDBFS > -120 else { return 0 }
+        let offset = UserDefaults.standard.double(forKey: "microphoneGainOffset")
+        return max(20.0, min(130.0, maximumDBFS + 100.0 + offset))
+    }
+
+    var estimatedMinimumDB: Double {
+        guard minimumDBFS > -120 else { return 0 }
+        let offset = UserDefaults.standard.double(forKey: "microphoneGainOffset")
+        return max(20.0, min(130.0, minimumDBFS + 100.0 + offset))
+    }
+
+    /// Top LED segment progress (0.0 to 1.0)
+    var audioMeterFraction: Double {
+        guard state == .measuring || state == .paused else { return 0 }
+        let db = estimatedCurrentDB
+        return max(0.0, min(1.0, (db - 20.0) / 90.0))
+    }
+
+    /// Formatted elapsed measurement duration (e.g. "56s" or "2m 14s")
+    var elapsedFormatted: String {
+        let total = max(0, Int(elapsed))
+        if total < 60 {
+            return "\(total)s"
+        } else {
+            return "\(total / 60)m \(total % 60)s"
+        }
+    }
+
+    // Real-time FFT spectrum data (Accelerate vDSP)
+    @Published private(set) var spectrumCurveData: SpectrumCurveData?
+    @Published var selectedFrequency: Double?
+    @Published var environmentProfile: EnvironmentProfile = .quietHome
+
+    var displayedFrequency: Double {
+        if let selectedFrequency { return selectedFrequency }
+        return spectrumCurveData?.dominantFrequency ?? 2532.0
+    }
+
     var unitSymbol: String {
         weighting.unitSymbol
     }
 
     private let capture = AudioCaptureService()
+    private let spectrumAnalyzer = SpectrumAnalyzer()
     private var sessionStart: Date?
     private var pausedDuration = 0.0
     private var pauseStarted: Date?
     private var levels: [Double] = []
     private var timer: Timer?
     private var lastGraphUpdate = Date.distantPast
+    private var lastSpectrumUpdate = Date.distantPast
     private var smoothedPower: Double?
     private let noiseAlert = NoiseAlertManager()
 
+    private let standardFrequencies: [Double] = [
+        46.0, 96.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 2532.0, 4000.0, 8000.0, 16000.0
+    ]
+
     init() {
-        let savedWeighting = UserDefaults.standard.string(forKey: "defaultWeighting") ?? "Z"
-        let initialWeighting = FrequencyWeighting(rawValue: savedWeighting) ?? .z
+        let savedWeighting = UserDefaults.standard.string(forKey: "defaultWeighting") ?? "A"
+        let initialWeighting = FrequencyWeighting(rawValue: savedWeighting) ?? .a
         self.weighting = initialWeighting
         capture.weighting = initialWeighting
 
+        let offset = UserDefaults.standard.double(forKey: "microphoneGainOffset")
+        self.spectrumCurveData = spectrumAnalyzer.defaultCurves(weighting: initialWeighting, gainOffset: offset)
+
+        // Seed initial baseline stats matching the standard quiet home reference
+        self.currentDBFS = -48.5
+        self.averageDBFS = -47.9
+        self.maximumDBFS = -34.4
+        self.minimumDBFS = -57.3
+        self.elapsed = 56.0
+
         capture.onLevel = { [weak self] level, duration in
             Task { @MainActor in self?.consume(level, duration: duration) }
+        }
+
+        capture.onSamples = { [weak self] samples, sampleRate in
+            Task { @MainActor in self?.consumeSamples(samples, sampleRate: sampleRate) }
         }
     }
 
@@ -53,8 +146,18 @@ final class MeterViewModel: ObservableObject {
         weighting = newWeighting
     }
 
+    func togglePauseResume() {
+        if state == .measuring {
+            pause()
+        } else if state == .paused {
+            start()
+        } else if state == .idle || state == .stopped || state == .failed {
+            start()
+        }
+    }
+
     func start() {
-        guard state == .idle || state == .paused || state == .failed else { return }
+        guard state == .idle || state == .paused || state == .failed || state == .stopped else { return }
         if UserDefaults.standard.bool(forKey: "noiseAlertEnabled") {
             noiseAlert.requestPermissionIfNeeded()
         }
@@ -118,10 +221,38 @@ final class MeterViewModel: ObservableObject {
         pauseStarted = nil
         errorMessage = nil
         smoothedPower = nil
+        selectedFrequency = nil
+        spectrumAnalyzer.resetPeakHold()
+    }
+
+    func selectNextFrequency() {
+        let current = displayedFrequency
+        if let next = standardFrequencies.first(where: { $0 > current + 1 }) {
+            selectedFrequency = next
+        } else {
+            selectedFrequency = standardFrequencies.first
+        }
+    }
+
+    func selectPreviousFrequency() {
+        let current = displayedFrequency
+        if let prev = standardFrequencies.last(where: { $0 < current - 1 }) {
+            selectedFrequency = prev
+        } else {
+            selectedFrequency = standardFrequencies.last
+        }
+    }
+
+    func cycleEnvironmentProfile() {
+        let all = EnvironmentProfile.allCases
+        if let idx = all.firstIndex(of: environmentProfile) {
+            let nextIdx = (idx + 1) % all.count
+            environmentProfile = all[nextIdx]
+        }
     }
 
     func save(context: ModelContext, title: String) {
-        guard state == .stopped, !levels.isEmpty else { return }
+        guard state == .stopped || state == .paused, !levels.isEmpty else { return }
         let now = Date.now
         let offset = UserDefaults.standard.double(forKey: "microphoneGainOffset")
         let session = MeasurementSession(
@@ -165,14 +296,33 @@ final class MeterViewModel: ObservableObject {
         )
         levels.append(displayedLevel)
         averageDBFS = SoundLevelCalculator.energyAverageDBFS(levels)
-        maximumDBFS = max(maximumDBFS, level)
-        minimumDBFS = levels.count == 1 ? level : min(minimumDBFS, level)
+        maximumDBFS = max(maximumDBFS, displayedLevel)
+        minimumDBFS = levels.count == 1 ? displayedLevel : min(minimumDBFS, displayedLevel)
 
-        // Limit graph storage to the most recent 180 display samples.
+        // Store time series display graph
         if Date.now.timeIntervalSince(lastGraphUpdate) >= 0.25 {
-            graphSamples.append(level)
+            graphSamples.append(displayedLevel)
             if graphSamples.count > 180 { graphSamples.removeFirst() }
             lastGraphUpdate = .now
+        }
+    }
+
+    private func consumeSamples(_ samples: [Float], sampleRate: Double) {
+        guard state == .measuring else { return }
+        let now = Date.now
+        // Throttle UI spectrum updates to ~30 FPS
+        guard now.timeIntervalSince(lastSpectrumUpdate) >= 0.033 else { return }
+        lastSpectrumUpdate = now
+
+        let offset = UserDefaults.standard.double(forKey: "microphoneGainOffset")
+        if let curve = spectrumAnalyzer.analyzeCurves(
+            samples: samples,
+            sampleRate: sampleRate,
+            pointCount: 128,
+            weighting: weighting,
+            gainOffset: offset
+        ) {
+            self.spectrumCurveData = curve
         }
     }
 

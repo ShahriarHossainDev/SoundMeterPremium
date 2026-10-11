@@ -8,10 +8,51 @@ struct SettingsView: View {
     @AppStorage("noiseAlertEnabled") private var noiseAlertEnabled = false
     @AppStorage("noiseAlertThreshold") private var noiseAlertThreshold = -12.0
     @AppStorage("showMeasurementDisclaimer") private var showDisclaimer = true
+    @State private var showingProPaywall = false
+    @State private var showingOnboarding = false
 
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    Button {
+                        showingProPaywall = true
+                    } label: {
+                        HStack(spacing: 14) {
+                            Image(systemName: "crown.fill")
+                                .font(.title2)
+                                .foregroundStyle(Color.yellow)
+                                .padding(10)
+                                .background(Color.yellow.opacity(0.15), in: Circle())
+
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 6) {
+                                    Text("SoundMeter Pro")
+                                        .font(.headline)
+                                        .foregroundStyle(.primary)
+                                    Text("PRO")
+                                        .font(.system(size: 10, weight: .black))
+                                        .foregroundStyle(.black)
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(AppTheme.accent, in: Capsule())
+                                }
+
+                                Text("Unlock A/C weighting, PDF reports & cloud sync")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Spacer()
+
+                            Image(systemName: "chevron.right")
+                                .font(.caption.bold())
+                                .foregroundStyle(.tertiary)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
+
                 Section("Appearance") {
                     Picker("Theme", selection: $appearance) {
                         Text("System").tag("system")
@@ -67,12 +108,35 @@ struct SettingsView: View {
                     }
                 }
 
+                Section("Help & Guides") {
+                    Button {
+                        showingOnboarding = true
+                    } label: {
+                        HStack {
+                            Label("Review Onboarding Guide", systemImage: "sparkles")
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption.bold())
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                }
+
                 Section("About") {
                     LabeledContent("Version", value: "0.2.0")
                     LabeledContent("Minimum iOS", value: "17.0")
                 }
             }
             .navigationTitle("Settings")
+            .sheet(isPresented: $showingProPaywall) {
+                NavigationStack {
+                    ProView()
+                }
+            }
+            .sheet(isPresented: $showingOnboarding) {
+                OnboardingView(isReviewMode: true)
+            }
         }
     }
 }

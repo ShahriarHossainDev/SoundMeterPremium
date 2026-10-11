@@ -9,6 +9,9 @@
 /* Begin PBXBuildFile section */
 		2C65F429307B5527009098A7 /* FrequencyWeighting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C65F428307B5527009098A7 /* FrequencyWeighting.swift */; };
 		2C65F42B307B57EC009098A7 /* PDFExporter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C65F42A307B57EC009098A7 /* PDFExporter.swift */; };
+		2CD23214307B5C4C0029157B /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CD23213307B5C4C0029157B /* OnboardingView.swift */; };
+		2CD23216307B5EED0029157B /* DosimeterCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CD23215307B5EED0029157B /* DosimeterCalculator.swift */; };
+		2CD23218307B5EF90029157B /* DosimeterViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2CD23217307B5EF90029157B /* DosimeterViewModel.swift */; };
 		A0000000000000000000001 /* SoundMeterApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000001 /* SoundMeterApp.swift */; };
 		A0000000000000000000002 /* AppTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000002 /* AppTheme.swift */; };
 		A0000000000000000000003 /* MeasurementSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0000000000000000000003 /* MeasurementSession.swift */; };
@@ -38,6 +41,9 @@
 /* Begin PBXFileReference section */
 		2C65F428307B5527009098A7 /* FrequencyWeighting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrequencyWeighting.swift; sourceTree = "<group>"; };
 		2C65F42A307B57EC009098A7 /* PDFExporter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PDFExporter.swift; sourceTree = "<group>"; };
+		2CD23213307B5C4C0029157B /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		2CD23215307B5EED0029157B /* DosimeterCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DosimeterCalculator.swift; sourceTree = "<group>"; };
+		2CD23217307B5EF90029157B /* DosimeterViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DosimeterViewModel.swift; sourceTree = "<group>"; };
 		B00000000000000000000001 /* SoundMeter.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SoundMeter.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		B0000000000000000000001 /* SoundMeterApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SoundMeterApp.swift; sourceTree = "<group>"; };
 		B0000000000000000000002 /* AppTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppTheme.swift; sourceTree = "<group>"; };
@@ -76,6 +82,14 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		2CD23212307B5C4C0029157B /* Onboarding */ = {
+			isa = PBXGroup;
+			children = (
+				2CD23213307B5C4C0029157B /* OnboardingView.swift */,
+			);
+			path = Onboarding;
+			sourceTree = "<group>";
+		};
 		2CEDF0C330796DA8004F70AB /* Recovered References */ = {
 			isa = PBXGroup;
 			children = (
@@ -123,6 +137,7 @@
 				B0000000000000000000005 /* AudioCaptureService.swift */,
 				B0000000000000000000014 /* SpectrumAnalyzer.swift */,
 				2C65F428307B5527009098A7 /* FrequencyWeighting.swift */,
+				2CD23215307B5EED0029157B /* DosimeterCalculator.swift */,
 			);
 			path = Audio;
 			sourceTree = "<group>";
@@ -165,6 +180,7 @@
 				C0000000000000000000015 /* Subscription */,
 				C0000000000000000000017 /* Spectrum */,
 				C0000000000000000000018 /* Dosimeter */,
+				2CD23212307B5C4C0029157B /* Onboarding */,
 			);
 			path = Features;
 			sourceTree = "<group>";
@@ -241,6 +257,7 @@
 			isa = PBXGroup;
 			children = (
 				B0000000000000000000016 /* DosimeterView.swift */,
+				2CD23217307B5EF90029157B /* DosimeterViewModel.swift */,
 			);
 			path = Dosimeter;
 			sourceTree = "<group>";
@@ -316,6 +333,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2CD23216307B5EED0029157B /* DosimeterCalculator.swift in Sources */,
 				A0000000000000000000001 /* SoundMeterApp.swift in Sources */,
 				A0000000000000000000002 /* AppTheme.swift in Sources */,
 				A0000000000000000000003 /* MeasurementSession.swift in Sources */,
@@ -327,6 +345,7 @@
 				A0000000000000000000009 /* SessionDetailView.swift in Sources */,
 				A000000000000000000000A /* CSVExporter.swift in Sources */,
 				A000000000000000000000B /* ShareSheet.swift in Sources */,
+				2CD23214307B5C4C0029157B /* OnboardingView.swift in Sources */,
 				2C65F429307B5527009098A7 /* FrequencyWeighting.swift in Sources */,
 				A000000000000000000000C /* ReportsView.swift in Sources */,
 				A000000000000000000000D /* CalibrationView.swift in Sources */,
@@ -341,6 +360,7 @@
 				A0000000000000000000015 /* SpectrumViewModel.swift in Sources */,
 				A0000000000000000000016 /* DosimeterView.swift in Sources */,
 				A0000000000000000000017 /* NoiseAlertManager.swift in Sources */,
+				2CD23218307B5EF90029157B /* DosimeterViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
