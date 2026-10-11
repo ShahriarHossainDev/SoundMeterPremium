@@ -20,12 +20,13 @@ public struct SpectrogramSlice: Sendable {
 }
 
 /// Produces real-time FFT spectrum measurements using Apple Accelerate framework.
-final class SpectrumAnalyzer {
+final class SpectrumAnalyzer: @unchecked Sendable {
     private let fftSize: Int
     private let log2n: vDSP_Length
     private let setup: FFTSetup
     private var window: [Float]
     private var peakHold: [Double] = []
+    private let lock = NSLock()
 
     init(fftSize: Int = 2048) {
         precondition(fftSize.isPowerOfTwo)
@@ -36,9 +37,15 @@ final class SpectrumAnalyzer {
         vDSP_hann_window(&window, vDSP_Length(fftSize), Int32(vDSP_HANN_NORM))
     }
 
-    deinit { vDSP_destroy_fftsetup(setup) }
+    deinit {
+        lock.lock()
+        vDSP_destroy_fftsetup(setup)
+        lock.unlock()
+    }
 
     func resetPeakHold() {
+        lock.lock()
+        defer { lock.unlock() }
         peakHold.removeAll()
     }
 
@@ -88,9 +95,11 @@ final class SpectrumAnalyzer {
             peakDB.append(peak)
         }
 
+        lock.lock()
         if peakHold.count != pointCount {
             peakHold = peakDB
         }
+        lock.unlock()
 
         return SpectrumCurveData(
             frequencies: freqs,
@@ -110,6 +119,10 @@ final class SpectrumAnalyzer {
         gainOffset: Double = 0.0
     ) -> SpectrumCurveData? {
         guard sampleRate > 0, samples.count >= fftSize else { return nil }
+
+        lock.lock()
+        defer { lock.unlock() }
+
         var real = Array(samples.suffix(fftSize))
         var imaginary = [Float](repeating: 0, count: fftSize)
         vDSP_vmul(real, 1, window, 1, &real, 1, vDSP_Length(fftSize))
@@ -164,11 +177,12 @@ final class SpectrumAnalyzer {
         }
 
         let peakLevel = instDB.max() ?? -25.0
+        let safePeakHold = Array(peakHold)
 
         return SpectrumCurveData(
             frequencies: freqs,
             instantaneousDB: instDB,
-            peakHoldDB: peakHold,
+            peakHoldDB: safePeakHold,
             dominantFrequency: dominantFrequency,
             peakLevelDB: peakLevel
         )
@@ -176,6 +190,10 @@ final class SpectrumAnalyzer {
 
     func analyze(samples: [Float], sampleRate: Double, displayBands: Int = 48) -> SpectrumFrame? {
         guard sampleRate > 0, samples.count >= fftSize else { return nil }
+
+        lock.lock()
+        defer { lock.unlock() }
+
         var real = Array(samples.suffix(fftSize))
         var imaginary = [Float](repeating: 0, count: fftSize)
         vDSP_vmul(real, 1, window, 1, &real, 1, vDSP_Length(fftSize))
@@ -216,6 +234,10 @@ final class SpectrumAnalyzer {
         gainOffset: Double = 0.0
     ) -> SpectrogramSlice? {
         guard sampleRate > 0, samples.count >= fftSize else { return nil }
+
+        lock.lock()
+        defer { lock.unlock() }
+
         var real = Array(samples.suffix(fftSize))
         var imaginary = [Float](repeating: 0, count: fftSize)
         vDSP_vmul(real, 1, window, 1, &real, 1, vDSP_Length(fftSize))

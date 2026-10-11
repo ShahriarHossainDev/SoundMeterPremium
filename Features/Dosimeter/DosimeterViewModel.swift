@@ -48,10 +48,14 @@ final class DosimeterViewModel: ObservableObject {
         self.capture.weighting = .a // NIOSH and OSHA standards require A-weighting
 
         self.capture.onLevel = { [weak self] rawDBFS, duration in
-            Task { @MainActor in
+            DispatchQueue.main.async {
                 self?.handleSample(rawDBFS: rawDBFS, duration: duration)
             }
         }
+    }
+
+    deinit {
+        capture.stop()
     }
 
     func start() {

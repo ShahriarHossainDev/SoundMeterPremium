@@ -27,7 +27,7 @@ final class SpectrumViewModel: ObservableObject {
                     let count = Int(buffer.frameLength)
                     let samples = Array(UnsafeBufferPointer(start: channel, count: count))
                     guard let frame = self?.analyzer.analyze(samples: samples, sampleRate: format.sampleRate) else { return }
-                    Task { @MainActor in
+                    DispatchQueue.main.async {
                         self?.bars = frame.magnitudes
                         self?.dominantFrequency = frame.dominantFrequency
                     }
@@ -37,5 +37,8 @@ final class SpectrumViewModel: ObservableObject {
         }
     }
     func stop() { if engine.isRunning { engine.stop() }; engine.inputNode.removeTap(onBus: 0); try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
-    deinit { engine.inputNode.removeTap(onBus: 0) }
+    deinit {
+        if engine.isRunning { engine.stop() }
+        engine.inputNode.removeTap(onBus: 0)
+    }
 }

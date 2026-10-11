@@ -2,6 +2,25 @@ import Foundation
 import SwiftData
 import SwiftUI
 
+private final class AtomicAnalysisFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+
+    func tryAcquire() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if value { return false }
+        value = true
+        return true
+    }
+
+    func release() {
+        lock.lock()
+        value = false
+        lock.unlock()
+    }
+}
+
 enum MeterState: Equatable {
     case idle, starting, measuring, paused, stopped, failed
 }
@@ -135,6 +154,8 @@ final class MeterViewModel: ObservableObject {
 
     private let capture = AudioCaptureService()
     private let spectrumAnalyzer = SpectrumAnalyzer()
+    private let analysisQueue = DispatchQueue(label: "com.soundmeter.analysis", qos: .userInitiated)
+    private let analyzingFlag = AtomicAnalysisFlag()
     private var sessionStart: Date?
     private var pausedDuration = 0.0
     private var pauseStarted: Date?
@@ -177,37 +198,46 @@ final class MeterViewModel: ObservableObject {
         self.graphSamples = Array(repeating: -48.5, count: 40)
 
         capture.onLevel = { [weak self] level, duration in
-            Task { @MainActor in self?.consume(level, duration: duration) }
+            DispatchQueue.main.async { [weak self] in
+                self?.consume(level, duration: duration)
+            }
         }
 
         capture.onSamples = { [weak self] samples, sampleRate in
-            guard let self else { return }
-            // Run Accelerate vDSP FFT processing on background thread
-            Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self, self.analyzingFlag.tryAcquire() else { return }
+
+            let currentWeighting = self.weighting
+            let flag = self.analyzingFlag
+            self.analysisQueue.async { [weak self] in
+                defer { flag.release() }
                 guard let self else { return }
                 let offset = UserDefaults.standard.double(forKey: "microphoneGainOffset")
-                let weighting = await self.weighting
-                let curve = await self.spectrumAnalyzer.analyzeCurves(
+                let curve = self.spectrumAnalyzer.analyzeCurves(
                     samples: samples,
                     sampleRate: sampleRate,
                     pointCount: 128,
-                    weighting: weighting,
+                    weighting: currentWeighting,
                     gainOffset: offset
                 )
-                let slice = await self.spectrumAnalyzer.analyzeSpectrogramSlice(
+                let slice = self.spectrumAnalyzer.analyzeSpectrogramSlice(
                     samples: samples,
                     sampleRate: sampleRate,
                     binCount: 36,
-                    weighting: weighting,
+                    weighting: currentWeighting,
                     gainOffset: offset
                 )
                 if curve != nil || slice != nil {
-                    Task { @MainActor [weak self] in
+                    DispatchQueue.main.async { [weak self] in
                         self?.receiveAnalysis(curve: curve, slice: slice)
                     }
                 }
             }
         }
+    }
+
+    deinit {
+        timer?.invalidate()
+        capture.stop()
     }
 
     func cycleVisualizationMode() {
@@ -431,7 +461,9 @@ final class MeterViewModel: ObservableObject {
     private func beginTimer() {
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.updateElapsed() }
+            DispatchQueue.main.async { [weak self] in
+                self?.updateElapsed()
+            }
         }
     }
 

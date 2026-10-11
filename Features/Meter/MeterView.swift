@@ -26,50 +26,48 @@ struct MeterView: View {
     private let accentPink = Color(red: 0.94, green: 0.45, blue: 0.70)     // #F073B3
 
     var body: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .top) {
-                darkBackground.ignoresSafeArea()
+        ZStack(alignment: .top) {
+            darkBackground.ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    // 1. Top Audio Level Segmented LED Bar
-                    topAudioMeterBar
-                        .padding(.top, geometry.safeAreaInsets.top > 0 ? 0 : 8)
-                        .padding(.bottom, 6)
+            VStack(spacing: 0) {
+                // 1. Top Audio Level Segmented LED Bar
+                topAudioMeterBar
+                    .padding(.top, 4)
+                    .padding(.bottom, 6)
 
-                    if isFullScreenSpectrum {
-                        // Fullscreen active chart mode
-                        spectrumSection
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                            .padding(.horizontal, 10)
-                            .padding(.bottom, 96)
-                            .transition(.opacity)
-                    } else {
-                        ScrollView(.vertical, showsIndicators: false) {
-                            VStack(spacing: 12) {
-                                // 2. Visualization Chart Section
-                                spectrumSection
-                                    .frame(height: 220)
-                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                    .padding(.horizontal, 14)
-
-                                // 3. Action Toolbar (Clipboard, Mode, Upgrade, Target, Trend)
-                                actionToolbar
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 2)
-
-                                // 4. Analog Sound Meter Panel
-                                analogMeterCard
-                                    .padding(.horizontal, 14)
-
-                                // 5. Live Measurement Stats Bottom Card
-                                liveMeasurementStatsCard
-                                    .padding(.horizontal, 14)
-                                    .padding(.bottom, 96) // Space for floating bottom tab bar
-                            }
-                        }
+                if isFullScreenSpectrum {
+                    // Fullscreen active chart mode
+                    spectrumSection
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 96)
                         .transition(.opacity)
+                } else {
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(spacing: 12) {
+                            // 2. Visualization Chart Section
+                            spectrumSection
+                                .frame(height: 220)
+                                .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                                .padding(.horizontal, 14)
+
+                            // 3. Action Toolbar (Clipboard, Mode, Upgrade, Target, Trend)
+                            actionToolbar
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 2)
+
+                            // 4. Analog Sound Meter Panel
+                            analogMeterCard
+                                .padding(.horizontal, 14)
+
+                            // 5. Live Measurement Stats Bottom Card
+                            liveMeasurementStatsCard
+                                .padding(.horizontal, 14)
+                                .padding(.bottom, 96) // Space for floating bottom tab bar
+                        }
                     }
+                    .transition(.opacity)
                 }
             }
         }
@@ -114,10 +112,20 @@ struct MeterView: View {
             let activeSegments = Int(round(model.audioMeterFraction * Double(totalSegments)))
 
             ForEach(0..<totalSegments, id: \.self) { index in
+                let segColor: Color = {
+                    if index < 18 {
+                        return accentGreen
+                    } else if index < 24 {
+                        return accentOrange
+                    } else {
+                        return Color(red: 0.95, green: 0.22, blue: 0.22)
+                    }
+                }()
+
                 RoundedRectangle(cornerRadius: 1.5)
-                    .fill(index < activeSegments ? accentGreen : Color(white: 0.15))
+                    .fill(index < activeSegments ? segColor : Color(white: 0.13))
                     .frame(height: 7)
-                    .shadow(color: index < activeSegments ? accentGreen.opacity(0.6) : .clear, radius: 2)
+                    .shadow(color: index < activeSegments ? segColor.opacity(0.55) : .clear, radius: 2)
             }
         }
         .padding(.horizontal, 14)
@@ -168,103 +176,100 @@ struct MeterView: View {
 
             // Overlaid Spectrum HUD Controls
             VStack {
-                HStack(alignment: .top) {
-                    // Top-Left: Info button, Environment profile selector, and Mode selector
-                    HStack(spacing: 6) {
-                        Button {
-                            showingInfo = true
-                        } label: {
-                            Image(systemName: "book.closed.fill")
-                                .font(.system(size: 13, weight: .semibold))
+                // Top Row Controls
+                HStack(alignment: .center, spacing: 6) {
+                    // Info button
+                    Button {
+                        showingInfo = true
+                    } label: {
+                        Image(systemName: "book.closed.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 32, height: 32)
+                            .background(Color.white.opacity(0.14), in: Circle())
+                    }
+
+                    // Profile selector pill
+                    Button {
+                        model.cycleEnvironmentProfile()
+                    } label: {
+                        VStack(spacing: 2) {
+                            HStack(spacing: 3) {
+                                ForEach(EnvironmentProfile.allCases) { profile in
+                                    Circle()
+                                        .fill(profile == model.environmentProfile ? Color.white : Color.white.opacity(0.25))
+                                        .frame(width: 3.5, height: 3.5)
+                                }
+                            }
+                            Text(model.environmentProfile.rawValue)
+                                .font(.system(size: 10, weight: .semibold))
                                 .foregroundStyle(.white)
-                                .frame(width: 34, height: 34)
-                                .background(Color.white.opacity(0.14), in: Circle())
                         }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.white.opacity(0.14), in: Capsule())
+                    }
 
-                        Button {
-                            model.cycleEnvironmentProfile()
-                        } label: {
-                            VStack(spacing: 3) {
-                                // Profile dots
-                                HStack(spacing: 4) {
-                                    ForEach(EnvironmentProfile.allCases) { profile in
-                                        Circle()
-                                            .fill(profile == model.environmentProfile ? Color.white : Color.white.opacity(0.25))
-                                            .frame(width: 4, height: 4)
-                                    }
+                    // Mode Selector Menu Pill
+                    Menu {
+                        ForEach(MeterVisualizationMode.allCases) { mode in
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    model.visualizationMode = mode
                                 }
-
-                                Text(model.environmentProfile.rawValue)
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(.white)
+                            } label: {
+                                Label(mode.title, systemImage: mode.icon)
                             }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(Color.white.opacity(0.14), in: Capsule())
                         }
-
-                        // Mode Selector Pill
-                        Menu {
-                            ForEach(MeterVisualizationMode.allCases) { mode in
-                                Button {
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        model.visualizationMode = mode
-                                    }
-                                } label: {
-                                    Label(mode.title, systemImage: mode.icon)
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: model.visualizationMode.icon)
-                                    .font(.system(size: 10, weight: .bold))
-                                    .foregroundStyle(accentOrange)
-                                Text(model.visualizationMode.rawValue)
-                                    .font(.system(size: 11, weight: .bold))
-                                    .foregroundStyle(.white)
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.system(size: 8, weight: .bold))
-                                    .foregroundStyle(.white.opacity(0.6))
-                            }
-                            .padding(.horizontal, 9)
-                            .padding(.vertical, 6)
-                            .background(Color.white.opacity(0.14), in: Capsule())
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: model.visualizationMode.icon)
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(accentOrange)
+                            Text(model.visualizationMode.rawValue)
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(.white)
+                            Image(systemName: "chevron.up.chevron.down")
+                                .font(.system(size: 7, weight: .bold))
+                                .foregroundStyle(.white.opacity(0.6))
                         }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color.white.opacity(0.14), in: Capsule())
                     }
 
                     Spacer()
 
-                    // Top-Right: Fullscreen button & Noise Alert Toggle
-                    VStack(alignment: .trailing, spacing: 8) {
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.25)) {
-                                isFullScreenSpectrum.toggle()
-                            }
-                        } label: {
-                            Image(systemName: isFullScreenSpectrum ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 34, height: 34)
-                                .background(Color.white.opacity(0.14), in: Circle())
-                        }
+                    // Noise Alert Toggle
+                    Button {
+                        noiseAlertEnabled.toggle()
+                    } label: {
+                        Image(systemName: noiseAlertEnabled ? "bell.fill" : "bell.slash.fill")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(noiseAlertEnabled ? accentOrange : Color.white.opacity(0.85))
+                            .frame(width: 32, height: 32)
+                            .background(Color.white.opacity(0.14), in: Circle())
+                    }
 
-                        Button {
-                            noiseAlertEnabled.toggle()
-                        } label: {
-                            Image(systemName: noiseAlertEnabled ? "bell.fill" : "bell.slash.fill")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(noiseAlertEnabled ? accentOrange : Color.white.opacity(0.85))
-                                .frame(width: 34, height: 34)
-                                .background(Color.white.opacity(0.14), in: Circle())
+                    // Fullscreen Toggle
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            isFullScreenSpectrum.toggle()
                         }
+                    } label: {
+                        Image(systemName: isFullScreenSpectrum ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 32, height: 32)
+                            .background(Color.white.opacity(0.14), in: Circle())
                     }
                 }
                 .padding(.horizontal, 10)
-                .padding(.top, 10)
+                .padding(.top, 8)
 
                 Spacer()
 
-                // Side frequency stepping navigation buttons
+                // Bottom frequency / mode stepping row
                 HStack {
                     Button {
                         if model.visualizationMode == .spectrumBars || model.visualizationMode == .spectrumLine {
@@ -275,21 +280,23 @@ struct MeterView: View {
                             }
                         }
                     } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                                .font(.system(size: 11, weight: .bold))
-                            if model.visualizationMode == .spectrumBars || model.visualizationMode == .spectrumLine {
-                                Text(String(format: "%.0f Hz", model.displayedFrequency))
-                                    .font(.system(size: 10, weight: .semibold))
-                            } else {
-                                Text(model.visualizationMode.rawValue)
-                                    .font(.system(size: 10, weight: .semibold))
-                            }
-                        }
-                        .foregroundStyle(.white.opacity(0.9))
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color.white.opacity(0.14), in: Capsule())
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(.white.opacity(0.9))
+                            .frame(width: 32, height: 32)
+                            .background(Color.white.opacity(0.14), in: Circle())
+                    }
+
+                    Spacer()
+
+                    if model.visualizationMode == .spectrumBars || model.visualizationMode == .spectrumLine {
+                        Text(String(format: "%.0f Hz", model.displayedFrequency))
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundStyle(accentGreen)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color.black.opacity(0.65), in: Capsule())
+                            .overlay(Capsule().stroke(Color.white.opacity(0.15), lineWidth: 1))
                     }
 
                     Spacer()
@@ -310,26 +317,28 @@ struct MeterView: View {
                             .background(Color.white.opacity(0.14), in: Circle())
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
             }
         }
     }
 
-    // MARK: - 3. Action Toolbar (Matches Reference Icons & Orange Upgrade Button)
+    // MARK: - 3. Action Toolbar (Evenly Distributed Toolbar Items)
     private var actionToolbar: some View {
-        HStack {
+        HStack(spacing: 0) {
             // 1. Clipboard / Reports button
             Button {
                 showingReports = true
             } label: {
                 Image(systemName: "doc.plaintext")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
                     .background(cardBackground, in: Circle())
                     .overlay(Circle().stroke(Color.white.opacity(0.08), lineWidth: 1))
             }
+
+            Spacer()
 
             // 2. Visualization Mode action button
             Menu {
@@ -344,7 +353,7 @@ struct MeterView: View {
                 }
             } label: {
                 Image(systemName: model.visualizationMode.icon)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(accentOrange)
                     .frame(width: 44, height: 44)
                     .background(cardBackground, in: Circle())
@@ -362,10 +371,10 @@ struct MeterView: View {
                 showingProPaywall = true
             } label: {
                 Text("Upgrade")
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 28)
-                    .padding(.vertical, 12)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 11)
                     .background(
                         LinearGradient(
                             colors: [accentOrange, Color(red: 1.0, green: 0.32, blue: 0.10)],
@@ -384,19 +393,21 @@ struct MeterView: View {
                 showingCalibration = true
             } label: {
                 Image(systemName: "scope")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
                     .background(cardBackground, in: Circle())
                     .overlay(Circle().stroke(Color.white.opacity(0.08), lineWidth: 1))
             }
 
+            Spacer()
+
             // 5. History / Trend button
             NavigationLink {
                 HistoryView()
             } label: {
                 Image(systemName: "chart.xyaxis.line")
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
                     .background(cardBackground, in: Circle())
@@ -408,85 +419,79 @@ struct MeterView: View {
     // MARK: - 4. Analog Sound Meter Card
     private var analogMeterCard: some View {
         VStack(spacing: 0) {
-            ZStack(alignment: .bottom) {
-                // Semicircular Analog Gauge Dial
-                AnalogGaugeDial(
-                    level: model.estimatedCurrentDB,
-                    minLevel: model.estimatedMinimumDB,
-                    maxLevel: model.estimatedMaximumDB
-                )
-                .frame(height: 195)
+            // Semicircular Analog Gauge Dial
+            AnalogGaugeDial(
+                level: model.estimatedCurrentDB,
+                minLevel: model.estimatedMinimumDB,
+                maxLevel: model.estimatedMaximumDB
+            )
+            .frame(height: 175)
 
-                // Bottom Overlay: Reset, Pause/Resume, Save & Elapsed Time
-                HStack(alignment: .center) {
-                    // Reset Button
-                    Button {
-                        if model.state == .measuring || model.state == .paused {
-                            showingResetAlert = true
-                        } else {
-                            model.reset()
-                        }
-                    } label: {
-                        Image(systemName: "arrow.counterclockwise")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .frame(width: 42, height: 42)
-                            .background(Color.white.opacity(0.10), in: Circle())
-                            .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
+            // Bottom Controls Row: Reset, Pause/Resume with Duration, Save
+            HStack(alignment: .center) {
+                // Reset Button
+                Button {
+                    if model.state == .measuring || model.state == .paused {
+                        showingResetAlert = true
+                    } else {
+                        model.reset()
                     }
+                } label: {
+                    Image(systemName: "arrow.counterclockwise")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .frame(width: 42, height: 42)
+                        .background(Color.white.opacity(0.10), in: Circle())
+                        .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
+                }
 
-                    Spacer()
+                Spacer()
 
-                    // Central Large Pause/Resume Button
+                // Central Large Pause/Resume Button + Elapsed Time
+                VStack(spacing: 5) {
                     Button {
                         model.togglePauseResume()
                     } label: {
                         ZStack {
                             Circle()
                                 .stroke(Color(red: 0.98, green: 0.78, blue: 0.28), lineWidth: 2.5)
-                                .frame(width: 66, height: 66)
+                                .frame(width: 62, height: 62)
 
                             Circle()
                                 .fill(Color(red: 0.08, green: 0.11, blue: 0.16))
-                                .frame(width: 61, height: 61)
+                                .frame(width: 57, height: 57)
 
                             Image(systemName: model.state == .measuring ? "pause.fill" : "play.fill")
-                                .font(.system(size: 22, weight: .bold))
+                                .font(.system(size: 21, weight: .bold))
                                 .foregroundStyle(Color(red: 0.98, green: 0.78, blue: 0.28))
                         }
                     }
 
-                    Spacer()
-
-                    // Save / Export Button
-                    Button {
-                        showingSave = true
-                    } label: {
-                        Image(systemName: "tray.and.arrow.down")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.85))
-                            .frame(width: 42, height: 42)
-                            .background(Color.white.opacity(0.10), in: Circle())
-                            .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
-                    }
-                }
-                .padding(.horizontal, 30)
-                .offset(y: 10)
-
-                // Elapsed time label in bottom right corner
-                VStack {
-                    Spacer()
-                    HStack {
-                        Spacer()
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 9, weight: .semibold))
                         Text(model.elapsedFormatted)
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
-                            .foregroundStyle(Color.white.opacity(0.45))
-                            .padding(.trailing, 16)
-                            .padding(.bottom, 6)
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
                     }
+                    .foregroundStyle(Color.white.opacity(0.55))
+                }
+
+                Spacer()
+
+                // Save / Export Button
+                Button {
+                    showingSave = true
+                } label: {
+                    Image(systemName: "tray.and.arrow.down")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(.white.opacity(0.85))
+                        .frame(width: 42, height: 42)
+                        .background(Color.white.opacity(0.10), in: Circle())
+                        .overlay(Circle().stroke(Color.white.opacity(0.12), lineWidth: 1))
                 }
             }
-            .padding(.top, 12)
+            .padding(.horizontal, 28)
+            .padding(.top, 4)
             .padding(.bottom, 14)
         }
         .background(
@@ -503,44 +508,59 @@ struct MeterView: View {
     private var liveMeasurementStatsCard: some View {
         HStack(alignment: .center) {
             // LEFT: AVG
-            VStack(spacing: 6) {
+            VStack(spacing: 4) {
                 Text("AVG")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.5))
-                    .padding(.horizontal, 10)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color.white.opacity(0.55))
+                    .padding(.horizontal, 9)
                     .padding(.vertical, 3)
                     .background(Color.white.opacity(0.08), in: Capsule())
 
                 Text(model.estimatedAverageDB > 0 ? String(format: "%.1f", model.estimatedAverageDB) : "--")
-                    .font(.system(size: 32, weight: .bold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 30, weight: .bold, design: .rounded).monospacedDigit())
                     .foregroundStyle(accentBlue)
             }
             .frame(maxWidth: .infinity)
 
-            // CENTER: Current Live Level
-            VStack(spacing: 0) {
+            // CENTER: Large Live Measurement & Weighting Unit
+            VStack(spacing: 4) {
                 Text(model.estimatedCurrentDB > 0 ? String(format: "%.1f", model.estimatedCurrentDB) : "--")
-                    .font(.system(size: 56, weight: .bold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 54, weight: .bold, design: .rounded).monospacedDigit())
                     .foregroundStyle(accentOrange)
+
+                Button {
+                    cycleWeighting()
+                } label: {
+                    HStack(spacing: 3) {
+                        Text(model.unitSymbol)
+                            .font(.system(size: 11, weight: .bold))
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 7, weight: .bold))
+                    }
+                    .foregroundStyle(Color.white.opacity(0.85))
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.white.opacity(0.12), in: Capsule())
+                }
             }
             .frame(maxWidth: .infinity)
 
             // RIGHT: MAX
-            VStack(spacing: 6) {
+            VStack(spacing: 4) {
                 Text("MAX")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(Color.white.opacity(0.5))
-                    .padding(.horizontal, 10)
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(Color.white.opacity(0.55))
+                    .padding(.horizontal, 9)
                     .padding(.vertical, 3)
                     .background(Color.white.opacity(0.08), in: Capsule())
 
                 Text(model.estimatedMaximumDB > 0 ? String(format: "%.1f", model.estimatedMaximumDB) : "--")
-                    .font(.system(size: 32, weight: .bold, design: .rounded).monospacedDigit())
+                    .font(.system(size: 30, weight: .bold, design: .rounded).monospacedDigit())
                     .foregroundStyle(accentBlue)
             }
             .frame(maxWidth: .infinity)
         }
-        .padding(.vertical, 16)
+        .padding(.vertical, 14)
         .padding(.horizontal, 12)
         .background(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -710,6 +730,7 @@ struct MeterView: View {
         }
     }
 }
+
 
 // MARK: - Mode 1: Spectrum Bars Canvas
 private struct SpectrumBarsCanvas: View {
@@ -1256,6 +1277,7 @@ private struct SpectrogramCanvas: View {
     }
 }
 
+
 // MARK: - Analog Gauge Dial
 private struct AnalogGaugeDial: View {
     let level: Double
@@ -1264,46 +1286,49 @@ private struct AnalogGaugeDial: View {
 
     private let blueScale = Color(red: 0.22, green: 0.65, blue: 0.98)   // #38BDF8
     private let orangeScale = Color(red: 0.98, green: 0.44, blue: 0.16) // #FA7028
-    private let needleRed = Color(red: 0.92, green: 0.22, blue: 0.22)   // #EA3838
 
     var body: some View {
         GeometryReader { geo in
             let w = geo.size.width
             let h = geo.size.height
-            let center = CGPoint(x: w / 2, y: h + 15)
-            let radius = min(w / 2 - 20, h + 5)
+            let center = CGPoint(x: w / 2, y: h - 10)
+            let radius = min(w / 2 - 16, h - 14)
 
             ZStack {
                 // Background dial markings
                 Canvas { ctx, size in
-                    // Sweep from 20 dB to 130 dB
                     let minDB = 20.0
                     let maxDB = 130.0
                     let startAngle = -142.0
                     let endAngle = -38.0
 
-                    // Continuous curved arc line at the base of the ticks
+                    // Split at 85 dB: 20-85 is blue, 85-130 is orange
                     let splitFrac = (85.0 - minDB) / (maxDB - minDB)
                     let splitDeg = startAngle + splitFrac * (endAngle - startAngle)
 
+                    // Continuous curved arc lines along tick base
                     var blueArc = Path()
-                    blueArc.addArc(
-                        center: center,
-                        radius: radius - 14,
-                        startAngle: .degrees(startAngle),
-                        endAngle: .degrees(splitDeg),
-                        clockwise: false
-                    )
+                    for deg in stride(from: startAngle, through: splitDeg, by: 1.0) {
+                        let rad = deg * .pi / 180.0
+                        let pt = CGPoint(x: center.x + CGFloat(cos(rad)) * (radius - 14), y: center.y + CGFloat(sin(rad)) * (radius - 14))
+                        if deg == startAngle {
+                            blueArc.move(to: pt)
+                        } else {
+                            blueArc.addLine(to: pt)
+                        }
+                    }
                     ctx.stroke(blueArc, with: .color(blueScale), lineWidth: 2.2)
 
                     var orangeArc = Path()
-                    orangeArc.addArc(
-                        center: center,
-                        radius: radius - 14,
-                        startAngle: .degrees(splitDeg),
-                        endAngle: .degrees(endAngle),
-                        clockwise: false
-                    )
+                    for deg in stride(from: splitDeg, through: endAngle, by: 1.0) {
+                        let rad = deg * .pi / 180.0
+                        let pt = CGPoint(x: center.x + CGFloat(cos(rad)) * (radius - 14), y: center.y + CGFloat(sin(rad)) * (radius - 14))
+                        if deg == splitDeg {
+                            orangeArc.move(to: pt)
+                        } else {
+                            orangeArc.addLine(to: pt)
+                        }
+                    }
                     ctx.stroke(orangeArc, with: .color(orangeScale), lineWidth: 2.2)
 
                     // Draw major and minor ticks
@@ -1315,8 +1340,8 @@ private struct AnalogGaugeDial: View {
                         let rad = deg * .pi / 180.0
 
                         let tickColor = db <= 80 ? blueScale : orangeScale
-                        let tickLen: CGFloat = isMajor ? 14 : (isMedium ? 9 : 5)
-                        let strokeW: CGFloat = isMajor ? 2.2 : (isMedium ? 1.5 : 1.0)
+                        let tickLen: CGFloat = isMajor ? 13 : (isMedium ? 8 : 4.5)
+                        let strokeW: CGFloat = isMajor ? 2.0 : (isMedium ? 1.4 : 0.9)
 
                         let outerP = CGPoint(
                             x: center.x + CGFloat(cos(rad)) * radius,
@@ -1334,13 +1359,13 @@ private struct AnalogGaugeDial: View {
 
                         // Draw major numbers
                         if isMajor {
-                            let textRadius = radius - 24
+                            let textRadius = radius - 23
                             let textP = CGPoint(
                                 x: center.x + CGFloat(cos(rad)) * textRadius,
                                 y: center.y + CGFloat(sin(rad)) * textRadius
                             )
                             let text = Text("\(db)")
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
+                                .font(.system(size: 10, weight: .bold, design: .rounded))
                                 .foregroundColor(tickColor)
                             ctx.draw(text, at: textP, anchor: .center)
                         }
@@ -1351,53 +1376,55 @@ private struct AnalogGaugeDial: View {
                         let minDeg = startAngle + ((minLevel - minDB) / (maxDB - minDB)) * (endAngle - startAngle)
                         let rad = minDeg * .pi / 180.0
                         let p1 = CGPoint(x: center.x + CGFloat(cos(rad)) * (radius - 14), y: center.y + CGFloat(sin(rad)) * (radius - 14))
-                        let p2 = CGPoint(x: center.x + CGFloat(cos(rad)) * (radius - 28), y: center.y + CGFloat(sin(rad)) * (radius - 28))
+                        let p2 = CGPoint(x: center.x + CGFloat(cos(rad)) * (radius - 26), y: center.y + CGFloat(sin(rad)) * (radius - 26))
                         var minLine = Path()
                         minLine.move(to: p1)
                         minLine.addLine(to: p2)
-                        ctx.stroke(minLine, with: .color(blueScale), lineWidth: 1.8)
+                        ctx.stroke(minLine, with: .color(blueScale), lineWidth: 2.0)
                     }
 
                     if maxLevel >= 20.0 {
                         let maxDeg = startAngle + ((maxLevel - minDB) / (maxDB - minDB)) * (endAngle - startAngle)
                         let rad = maxDeg * .pi / 180.0
                         let p1 = CGPoint(x: center.x + CGFloat(cos(rad)) * (radius - 14), y: center.y + CGFloat(sin(rad)) * (radius - 14))
-                        let p2 = CGPoint(x: center.x + CGFloat(cos(rad)) * (radius - 28), y: center.y + CGFloat(sin(rad)) * (radius - 28))
+                        let p2 = CGPoint(x: center.x + CGFloat(cos(rad)) * (radius - 26), y: center.y + CGFloat(sin(rad)) * (radius - 26))
                         var maxLine = Path()
                         maxLine.move(to: p1)
                         maxLine.addLine(to: p2)
-                        ctx.stroke(maxLine, with: .color(orangeScale), lineWidth: 1.8)
+                        ctx.stroke(maxLine, with: .color(orangeScale), lineWidth: 2.0)
                     }
                 }
 
-                // Inner Dial MIN / MAX Indicators
-                VStack(spacing: 2) {
-                    HStack(spacing: 38) {
-                        VStack(spacing: 2) {
-                            Text("MIN")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(blueScale)
-                            Text(minLevel > 0 ? String(format: "%.1f", minLevel) : "--")
-                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                .foregroundStyle(Color.white.opacity(0.7))
-                        }
-
-                        VStack(spacing: 2) {
-                            Text("MAX")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(orangeScale)
-                            Text(maxLevel > 0 ? String(format: "%.1f", maxLevel) : "--")
-                                .font(.system(size: 12, weight: .bold, design: .monospaced))
-                                .foregroundStyle(Color.white.opacity(0.7))
-                        }
+                // Inner Dial MIN / MAX Readouts (positioned symmetrically to left & right)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("MIN")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(blueScale)
+                        Text(minLevel > 0 ? String(format: "%.1f", minLevel) : "--")
+                            .font(.system(size: 13, weight: .bold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(Color.white.opacity(0.85))
                     }
+                    .padding(.leading, 32)
+
+                    Spacer()
+
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("MAX")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(orangeScale)
+                        Text(maxLevel > 0 ? String(format: "%.1f", maxLevel) : "--")
+                            .font(.system(size: 13, weight: .bold, design: .rounded).monospacedDigit())
+                            .foregroundStyle(Color.white.opacity(0.85))
+                    }
+                    .padding(.trailing, 32)
                 }
-                .offset(y: 10)
+                .offset(y: 20)
 
                 // The Needle
                 NeedleView(
                     center: center,
-                    length: radius - 8,
+                    length: radius - 6,
                     angle: needleAngle(for: level)
                 )
             }
@@ -1429,12 +1456,12 @@ private struct NeedleView: View {
                 y: center.y + CGFloat(sin(rad)) * length
             )
             let leftBase = CGPoint(
-                x: center.x + CGFloat(cos(rad - .pi / 2)) * 4,
-                y: center.y + CGFloat(sin(rad - .pi / 2)) * 4
+                x: center.x + CGFloat(cos(rad - .pi / 2)) * 3.5,
+                y: center.y + CGFloat(sin(rad - .pi / 2)) * 3.5
             )
             let rightBase = CGPoint(
-                x: center.x + CGFloat(cos(rad + .pi / 2)) * 4,
-                y: center.y + CGFloat(sin(rad + .pi / 2)) * 4
+                x: center.x + CGFloat(cos(rad + .pi / 2)) * 3.5,
+                y: center.y + CGFloat(sin(rad + .pi / 2)) * 3.5
             )
 
             var needle = Path()
@@ -1446,10 +1473,15 @@ private struct NeedleView: View {
             ctx.fill(needle, with: .color(Color(red: 0.94, green: 0.22, blue: 0.22)))
 
             // Center pivot cap
-            let capRect = CGRect(x: center.x - 8, y: center.y - 8, width: 16, height: 16)
-            ctx.fill(Circle().path(in: capRect), with: .color(Color(white: 0.15)))
-            ctx.stroke(Circle().path(in: capRect), with: .color(.black), lineWidth: 2)
+            let capRadius: CGFloat = 8
+            let capRect = CGRect(x: center.x - capRadius, y: center.y - capRadius, width: capRadius * 2, height: capRadius * 2)
+            ctx.fill(Circle().path(in: capRect), with: .color(Color(red: 0.12, green: 0.15, blue: 0.20)))
+            ctx.stroke(Circle().path(in: capRect), with: .color(Color(white: 0.3)), lineWidth: 1.5)
+
+            // Inner pivot dot
+            let innerDot = CGRect(x: center.x - 2.5, y: center.y - 2.5, width: 5, height: 5)
+            ctx.fill(Circle().path(in: innerDot), with: .color(Color.white.opacity(0.7)))
         }
-        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: angle)
+        .animation(.spring(response: 0.26, dampingFraction: 0.72), value: angle)
     }
 }

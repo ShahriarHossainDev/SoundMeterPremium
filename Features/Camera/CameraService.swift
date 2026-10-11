@@ -660,6 +660,7 @@ final class CameraService: NSObject, ObservableObject {
     // MARK: - Audio Engine Integration
 
     private let audioCaptureService = AudioCaptureService()
+    private var audioCaptureTask: Task<Void, Never>?
 
     // MARK: - Capture Components & Queues
 
@@ -672,6 +673,7 @@ final class CameraService: NSObject, ObservableObject {
 
     private var isSessionRunning = false
     private var isConfiguring = false
+    private var internalIsConfigured = false
 
     private var videoInput: AVCaptureDeviceInput?
     private var audioInput: AVCaptureDeviceInput?
@@ -761,8 +763,8 @@ final class CameraService: NSObject, ObservableObject {
     // MARK: - Session Configuration
 
     private func configureSessionIfNeeded() {
-        guard !isConfigured, !isConfiguring else {
-            if isConfigured {
+        guard !internalIsConfigured, !isConfiguring else {
+            if internalIsConfigured {
                 startSessionIfNeeded()
             }
             return
@@ -826,6 +828,7 @@ final class CameraService: NSObject, ObservableObject {
 
         session.commitConfiguration()
         isConfiguring = false
+        internalIsConfigured = true
 
         DispatchQueue.main.async {
             self.isConfigured = true
@@ -840,7 +843,7 @@ final class CameraService: NSObject, ObservableObject {
         sessionQueue.async { [weak self] in
             guard let self else { return }
 
-            if !self.isConfigured {
+            if !self.internalIsConfigured {
                 self.configureSessionIfNeeded()
                 return
             }
@@ -848,15 +851,18 @@ final class CameraService: NSObject, ObservableObject {
             self.startSessionIfNeeded()
         }
 
-        Task { [weak self] in
+        audioCaptureTask?.cancel()
+        audioCaptureTask = Task { [weak self] in
+            guard let self else { return }
             let saved = UserDefaults.standard.string(forKey: "defaultWeighting") ?? "Z"
-            self?.audioCaptureService.weighting = FrequencyWeighting(rawValue: saved) ?? .z
-            try? await self?.audioCaptureService.start()
+            self.audioCaptureService.weighting = FrequencyWeighting(rawValue: saved) ?? .z
+            guard !Task.isCancelled else { return }
+            try? await self.audioCaptureService.start()
         }
     }
 
     private func startSessionIfNeeded() {
-        guard isConfigured || isConfiguring else { return }
+        guard internalIsConfigured else { return }
         guard !isSessionRunning else { return }
 
         if !session.isRunning {
@@ -866,6 +872,8 @@ final class CameraService: NSObject, ObservableObject {
     }
 
     func stop() {
+        audioCaptureTask?.cancel()
+        audioCaptureTask = nil
         audioCaptureService.stop()
 
         sessionQueue.async { [weak self] in
@@ -880,6 +888,14 @@ final class CameraService: NSObject, ObservableObject {
             }
 
             self.isSessionRunning = false
+        }
+    }
+
+    deinit {
+        audioCaptureTask?.cancel()
+        audioCaptureService.stop()
+        if session.isRunning {
+            session.stopRunning()
         }
     }
 
@@ -954,7 +970,7 @@ final class CameraService: NSObject, ObservableObject {
     func capturePhoto() {
         sessionQueue.async { [weak self] in
             guard let self,
-                  self.isConfigured,
+                  self.internalIsConfigured,
                   self.session.isRunning else {
                 self?.publishError(CameraServiceError.cameraUnavailable)
                 return
@@ -982,7 +998,7 @@ final class CameraService: NSObject, ObservableObject {
     func startRecording() {
         sessionQueue.async { [weak self] in
             guard let self,
-                  self.isConfigured,
+                  self.internalIsConfigured,
                   self.session.isRunning,
                   !self.movieOutput.isRecording else {
                 return
@@ -1018,7 +1034,7 @@ final class CameraService: NSObject, ObservableObject {
     func switchCamera() {
         sessionQueue.async { [weak self] in
             guard let self,
-                  self.isConfigured,
+                  self.internalIsConfigured,
                   !self.movieOutput.isRecording,
                   let currentInput = self.videoInput else {
                 return
@@ -1166,19 +1182,19 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
             return
         }
 
-        let processedImage = OverlayRenderer.processCapturedPhoto(
-            image: rawImage,
-            currentDBFS: currentDBFS,
-            averageDBFS: averageDBFS,
-            minimumDBFS: minimumDBFS,
-            maximumDBFS: maximumDBFS,
-            peakDBFS: peakDBFS,
-            filter: selectedFilter,
-            settings: overlaySettings,
-            timestamp: Date()
-        )
-
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let processedImage = OverlayRenderer.processCapturedPhoto(
+                image: rawImage,
+                currentDBFS: self.currentDBFS,
+                averageDBFS: self.averageDBFS,
+                minimumDBFS: self.minimumDBFS,
+                maximumDBFS: self.maximumDBFS,
+                peakDBFS: self.peakDBFS,
+                filter: self.selectedFilter,
+                settings: self.overlaySettings,
+                timestamp: Date()
+            )
             self.capturedImage = processedImage
         }
     }
@@ -1194,52 +1210,51 @@ extension CameraService: AVCaptureFileOutputRecordingDelegate {
         from connections: [AVCaptureConnection],
         error: Error?
     ) {
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
             self.isRecording = false
-        }
 
-        if let error {
-            publishError(error)
-            return
-        }
+            if let error {
+                self.publishError(error)
+                return
+            }
 
-        let exportOutputURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("SoundMeter-export-\(UUID().uuidString).mov")
+            let exportOutputURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent("SoundMeter-export-\(UUID().uuidString).mov")
 
-        DispatchQueue.main.async {
             self.isExportingVideo = true
             self.exportProgress = 0.0
-        }
 
-        let snapshots = self.recordedSnapshots
-        let filter = self.selectedFilter
-        let settings = self.overlaySettings
-        let startDate = self.recordingStartDate ?? Date()
+            let snapshots = self.recordedSnapshots
+            let filter = self.selectedFilter
+            let settings = self.overlaySettings
+            let startDate = self.recordingStartDate ?? Date()
 
-        VideoOverlayExporter.exportVideo(
-            inputURL: outputFileURL,
-            outputURL: exportOutputURL,
-            snapshots: snapshots,
-            filter: filter,
-            overlaySettings: settings,
-            recordingStartDate: startDate,
-            progress: { [weak self] prog in
-                DispatchQueue.main.async {
-                    self?.exportProgress = prog
-                }
-            },
-            completion: { [weak self] result in
-                guard let self else { return }
-                DispatchQueue.main.async {
-                    self.isExportingVideo = false
-                    switch result {
-                    case .success(let finalURL):
-                        self.savedVideoURL = finalURL
-                    case .failure(let exportErr):
-                        self.errorMessage = exportErr.localizedDescription
+            VideoOverlayExporter.exportVideo(
+                inputURL: outputFileURL,
+                outputURL: exportOutputURL,
+                snapshots: snapshots,
+                filter: filter,
+                overlaySettings: settings,
+                recordingStartDate: startDate,
+                progress: { [weak self] prog in
+                    DispatchQueue.main.async {
+                        self?.exportProgress = prog
+                    }
+                },
+                completion: { [weak self] result in
+                    guard let self else { return }
+                    DispatchQueue.main.async {
+                        self.isExportingVideo = false
+                        switch result {
+                        case .success(let finalURL):
+                            self.savedVideoURL = finalURL
+                        case .failure(let exportErr):
+                            self.errorMessage = exportErr.localizedDescription
+                        }
                     }
                 }
-            }
-        )
+            )
+        }
     }
 }
