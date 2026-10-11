@@ -36,28 +36,39 @@ struct MeterView: View {
                         .padding(.top, geometry.safeAreaInsets.top > 0 ? 0 : 8)
                         .padding(.bottom, 6)
 
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(spacing: 12) {
-                            // 2. Frequency Spectrum Chart
-                            spectrumSection
-                                .frame(height: isFullScreenSpectrum ? 380 : 220)
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                .padding(.horizontal, 14)
+                    if isFullScreenSpectrum {
+                        // Fullscreen active chart mode
+                        spectrumSection
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .padding(.horizontal, 10)
+                            .padding(.bottom, 96)
+                            .transition(.opacity)
+                    } else {
+                        ScrollView(.vertical, showsIndicators: false) {
+                            VStack(spacing: 12) {
+                                // 2. Visualization Chart Section
+                                spectrumSection
+                                    .frame(height: 220)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .padding(.horizontal, 14)
 
-                            // 3. Action Toolbar (Clipboard, Mode, Upgrade, Target, Trend)
-                            actionToolbar
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 2)
+                                // 3. Action Toolbar (Clipboard, Mode, Upgrade, Target, Trend)
+                                actionToolbar
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 2)
 
-                            // 4. Analog Sound Meter Panel
-                            analogMeterCard
-                                .padding(.horizontal, 14)
+                                // 4. Analog Sound Meter Panel
+                                analogMeterCard
+                                    .padding(.horizontal, 14)
 
-                            // 5. Live Measurement Stats Bottom Card
-                            liveMeasurementStatsCard
-                                .padding(.horizontal, 14)
-                                .padding(.bottom, 96) // Space for floating bottom tab bar
+                                // 5. Live Measurement Stats Bottom Card
+                                liveMeasurementStatsCard
+                                    .padding(.horizontal, 14)
+                                    .padding(.bottom, 96) // Space for floating bottom tab bar
+                            }
                         }
+                        .transition(.opacity)
                     }
                 }
             }
@@ -112,23 +123,54 @@ struct MeterView: View {
         .padding(.horizontal, 14)
     }
 
-    // MARK: - 2. Frequency Spectrum Section
+    // MARK: - 2. Visualization Chart Section (Supports All 5 Modes)
     private var spectrumSection: some View {
         ZStack(alignment: .top) {
             Color.black
 
-            // Real-time FFT Curve Canvas
-            SpectrumChartCanvas(
-                curveData: model.spectrumCurveData,
-                selectedFrequency: model.displayedFrequency,
-                weightingUnit: model.unitSymbol
-            )
+            // Active Visualization Mode Canvas
+            Group {
+                switch model.visualizationMode {
+                case .spectrumBars:
+                    SpectrumBarsCanvas(
+                        curveData: model.spectrumCurveData,
+                        selectedFrequency: model.displayedFrequency,
+                        weightingUnit: model.unitSymbol
+                    )
+                case .spectrumLine:
+                    SpectrumLineCanvas(
+                        curveData: model.spectrumCurveData,
+                        selectedFrequency: model.displayedFrequency,
+                        weightingUnit: model.unitSymbol
+                    )
+                case .waveform:
+                    WaveformTrendCanvas(
+                        samples: model.waveformSamples,
+                        currentDB: model.estimatedCurrentDB,
+                        weightingUnit: model.unitSymbol
+                    )
+                case .historyGraph:
+                    HistoryGraphCanvas(
+                        samples: model.graphSamples,
+                        minDB: model.estimatedMinimumDB,
+                        maxDB: model.estimatedMaximumDB,
+                        avgDB: model.estimatedAverageDB,
+                        weightingUnit: model.unitSymbol
+                    )
+                case .spectrogram:
+                    SpectrogramCanvas(
+                        history: model.spectrogramHistory,
+                        weightingUnit: model.unitSymbol
+                    )
+                }
+            }
+            .animation(.easeInOut(duration: 0.25), value: model.visualizationMode)
 
             // Overlaid Spectrum HUD Controls
             VStack {
                 HStack(alignment: .top) {
-                    // Top-Left: Info button & Environment profile selector
-                    HStack(spacing: 8) {
+                    // Top-Left: Info button, Environment profile selector, and Mode selector
+                    HStack(spacing: 6) {
                         Button {
                             showingInfo = true
                         } label: {
@@ -153,10 +195,38 @@ struct MeterView: View {
                                 }
 
                                 Text(model.environmentProfile.rawValue)
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .font(.system(size: 11, weight: .semibold))
                                     .foregroundStyle(.white)
                             }
-                            .padding(.horizontal, 12)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 5)
+                            .background(Color.white.opacity(0.14), in: Capsule())
+                        }
+
+                        // Mode Selector Pill
+                        Menu {
+                            ForEach(MeterVisualizationMode.allCases) { mode in
+                                Button {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        model.visualizationMode = mode
+                                    }
+                                } label: {
+                                    Label(mode.title, systemImage: mode.icon)
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: model.visualizationMode.icon)
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundStyle(accentOrange)
+                                Text(model.visualizationMode.rawValue)
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundStyle(.white)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.system(size: 8, weight: .bold))
+                                    .foregroundStyle(.white.opacity(0.6))
+                            }
+                            .padding(.horizontal, 9)
                             .padding(.vertical, 6)
                             .background(Color.white.opacity(0.14), in: Capsule())
                         }
@@ -189,7 +259,7 @@ struct MeterView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 12)
+                .padding(.horizontal, 10)
                 .padding(.top, 10)
 
                 Spacer()
@@ -197,13 +267,24 @@ struct MeterView: View {
                 // Side frequency stepping navigation buttons
                 HStack {
                     Button {
-                        model.selectPreviousFrequency()
+                        if model.visualizationMode == .spectrumBars || model.visualizationMode == .spectrumLine {
+                            model.selectPreviousFrequency()
+                        } else {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                model.previousVisualizationMode()
+                            }
+                        }
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 11, weight: .bold))
-                            Text(String(format: "%.0f Hz", model.displayedFrequency))
-                                .font(.system(size: 10, weight: .semibold))
+                            if model.visualizationMode == .spectrumBars || model.visualizationMode == .spectrumLine {
+                                Text(String(format: "%.0f Hz", model.displayedFrequency))
+                                    .font(.system(size: 10, weight: .semibold))
+                            } else {
+                                Text(model.visualizationMode.rawValue)
+                                    .font(.system(size: 10, weight: .semibold))
+                            }
                         }
                         .foregroundStyle(.white.opacity(0.9))
                         .padding(.horizontal, 10)
@@ -214,7 +295,13 @@ struct MeterView: View {
                     Spacer()
 
                     Button {
-                        model.selectNextFrequency()
+                        if model.visualizationMode == .spectrumBars || model.visualizationMode == .spectrumLine {
+                            model.selectNextFrequency()
+                        } else {
+                            withAnimation(.easeInOut(duration: 0.2)) {
+                                model.nextVisualizationMode()
+                            }
+                        }
                     } label: {
                         Image(systemName: "chevron.right")
                             .font(.system(size: 12, weight: .bold))
@@ -244,16 +331,28 @@ struct MeterView: View {
                     .overlay(Circle().stroke(Color.white.opacity(0.08), lineWidth: 1))
             }
 
-            // 2. Frequency Weighting mode button
-            Button {
-                cycleWeighting()
+            // 2. Visualization Mode action button
+            Menu {
+                ForEach(MeterVisualizationMode.allCases) { mode in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            model.visualizationMode = mode
+                        }
+                    } label: {
+                        Label(mode.title, systemImage: mode.icon)
+                    }
+                }
             } label: {
-                Image(systemName: "tuningfork")
+                Image(systemName: model.visualizationMode.icon)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(model.weighting == .a ? accentOrange : .white)
+                    .foregroundStyle(accentOrange)
                     .frame(width: 44, height: 44)
                     .background(cardBackground, in: Circle())
                     .overlay(Circle().stroke(Color.white.opacity(0.08), lineWidth: 1))
+            } primaryAction: {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    model.cycleVisualizationMode()
+                }
             }
 
             Spacer()
@@ -501,35 +600,90 @@ struct MeterView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    Label("Frequency Spectrum Analyzer", systemImage: "waveform.path")
+                    Label("Meter Visualization Modes", systemImage: "waveform.path")
                         .font(.title2.bold())
                         .foregroundStyle(accentOrange)
 
-                    Text("This spectrum chart displays live Fast Fourier Transform (FFT) analysis computed directly from device microphone samples using Apple's Accelerate framework.")
+                    Text("SoundMeter Premium provides five specialized acoustic visualization modes driven directly by real-time audio captured from your microphone and processed with Apple's Accelerate framework.")
                         .font(.body)
                         .foregroundStyle(.secondary)
 
                     Divider()
 
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Spectrum Curves").font(.headline)
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("Five Visualization Engines").font(.headline)
 
+                        // Mode 1: Spectrum Bars
                         HStack(alignment: .top, spacing: 12) {
-                            Circle().fill(accentGreen).frame(width: 12, height: 12).padding(.top, 4)
+                            Image(systemName: "chart.bar.fill")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(accentGreen)
+                                .frame(width: 20)
+                                .padding(.top, 2)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Lime Green Curve — Instantaneous FFT")
+                                Text("1. Spectrum Bars")
                                     .font(.subheadline.bold())
-                                Text("Real-time frequency distribution showing live harmonics and ambient acoustic energy.")
+                                Text("Vertical lime-green frequency bars with pink peak-hold caps across logarithmic frequency bands (20 Hz to 20,000 Hz).")
                                     .font(.footnote).foregroundStyle(.secondary)
                             }
                         }
 
+                        // Mode 2: Spectrum Line
                         HStack(alignment: .top, spacing: 12) {
-                            Circle().fill(accentPink).frame(width: 12, height: 12).padding(.top, 4)
+                            Image(systemName: "waveform.path.ecg")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(accentGreen)
+                                .frame(width: 20)
+                                .padding(.top, 2)
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Pink Curve — Peak Hold Envelope")
+                                Text("2. Spectrum Line")
                                     .font(.subheadline.bold())
-                                Text("Tracks the highest amplitude reached across each frequency band during this session.")
+                                Text("Dual continuous FFT curves: lime-green instantaneous acoustic energy and pink peak-hold envelope.")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
+                        }
+
+                        // Mode 3: Waveform / Live Trend
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "waveform")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(accentGreen)
+                                .frame(width: 20)
+                                .padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("3. Live Waveform Trend")
+                                    .font(.subheadline.bold())
+                                Text("High-resolution real-time scrolling acoustic decibel trend with glowing leading edge and area illumination.")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
+                        }
+
+                        // Mode 4: History Graph
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "chart.xyaxis.line")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(accentBlue)
+                                .frame(width: 20)
+                                .padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("4. Session History Graph")
+                                    .font(.subheadline.bold())
+                                Text("Chronological time-domain curve showing session progression with calibrated MIN (blue), MAX (orange), and AVG guideline markers.")
+                                    .font(.footnote).foregroundStyle(.secondary)
+                            }
+                        }
+
+                        // Mode 5: Spectrogram
+                        HStack(alignment: .top, spacing: 12) {
+                            Image(systemName: "square.grid.3x3.fill")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(Color.cyan)
+                                .frame(width: 20)
+                                .padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("5. Waterfall Spectrogram")
+                                    .font(.subheadline.bold())
+                                Text("Two-dimensional time-versus-frequency acoustic heatmap mapping energy distribution using Deep Navy, Cyan, Lime Green, Yellow, and Red spectrum colors.")
                                     .font(.footnote).foregroundStyle(.secondary)
                             }
                         }
@@ -546,7 +700,7 @@ struct MeterView: View {
                 }
                 .padding(20)
             }
-            .navigationTitle("Spectrum Guide")
+            .navigationTitle("Visualization Guide")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
@@ -557,17 +711,16 @@ struct MeterView: View {
     }
 }
 
-// MARK: - Frequency Spectrum Chart Canvas
-private struct SpectrumChartCanvas: View {
+// MARK: - Mode 1: Spectrum Bars Canvas
+private struct SpectrumBarsCanvas: View {
     let curveData: SpectrumCurveData?
     let selectedFrequency: Double
     let weightingUnit: String
 
     private let gridColor = Color(red: 0.16, green: 0.22, blue: 0.30)
-    private let pinkColor = Color(red: 0.94, green: 0.45, blue: 0.70)
-    private let greenColor = Color(red: 0.55, green: 0.88, blue: 0.25)
+    private let barColor = Color(red: 0.55, green: 0.88, blue: 0.25) // Lime green
+    private let peakColor = Color(red: 0.94, green: 0.45, blue: 0.70) // Pink
 
-    // Standard reference frequency labels
     private let frequencyLabels: [(name: String, freq: Double)] = [
         ("500", 500.0),
         ("1K", 1000.0),
@@ -576,15 +729,131 @@ private struct SpectrumChartCanvas: View {
         ("8K", 8000.0),
         ("16K", 16000.0)
     ]
-
-    // Vertical dB scale markers (-20 to 120 dB)
     private let dbMarkers: [Int] = [120, 100, 80, 60, 40, 20, 0, -20]
 
     var body: some View {
         GeometryReader { geo in
-            let w = geo.size.width
-            let h = geo.size.height
+            Canvas { ctx, size in
+                // 1. Horizontal dB Grid Lines & Scale Markers
+                for db in dbMarkers {
+                    let y = yForDB(Double(db), height: size.height)
+                    var line = Path()
+                    line.move(to: CGPoint(x: 32, y: y))
+                    line.addLine(to: CGPoint(x: size.width, y: y))
+                    ctx.stroke(line, with: .color(gridColor), lineWidth: 0.8)
 
+                    let labelText = db == 20 ? "20 \(weightingUnit)" : "\(db)"
+                    let text = Text(labelText)
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(Color.white.opacity(0.4))
+                    ctx.draw(text, at: CGPoint(x: 18, y: y), anchor: .center)
+                }
+
+                // 2. Vertical Frequency Grid Lines & Top Labels
+                for mark in frequencyLabels {
+                    let x = xForFreq(mark.freq, width: size.width)
+                    var vLine = Path()
+                    vLine.move(to: CGPoint(x: x, y: 16))
+                    vLine.addLine(to: CGPoint(x: x, y: size.height))
+                    ctx.stroke(vLine, with: .color(gridColor), lineWidth: 0.8)
+
+                    let text = Text(mark.name)
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(Color.white.opacity(0.45))
+                    ctx.draw(text, at: CGPoint(x: x, y: 8), anchor: .center)
+                }
+
+                // 3. Draw Vertical Spectrum Bars with Peak Hold Caps
+                if let data = curveData, data.frequencies.count > 1 {
+                    let totalBars = 36
+                    let leftMargin: CGFloat = 36
+                    let usableWidth = size.width - leftMargin - 8
+                    let slotWidth = usableWidth / CGFloat(totalBars)
+                    let barWidth = max(3.0, slotWidth - 2.5)
+                    let baselineY = yForDB(-20.0, height: size.height)
+
+                    var peakBarX: CGFloat = 0
+                    var peakBarY: CGFloat = size.height
+
+                    for b in 0..<totalBars {
+                        let sampleIdx = Int(round(Double(b) * Double(data.frequencies.count - 1) / Double(totalBars - 1)))
+                        let f = data.frequencies[sampleIdx]
+                        let instDB = data.instantaneousDB[sampleIdx]
+                        let peakDB = data.peakHoldDB[sampleIdx]
+
+                        let x = leftMargin + CGFloat(b) * slotWidth + (slotWidth - barWidth) / 2
+                        let instY = yForDB(instDB, height: size.height)
+                        let barHeight = max(2.0, baselineY - instY)
+
+                        // Draw Lime Green Bar
+                        let barRect = CGRect(x: x, y: instY, width: barWidth, height: barHeight)
+                        let barPath = Path(roundedRect: barRect, cornerRadius: 1.5)
+                        ctx.fill(barPath, with: .color(barColor))
+
+                        // Draw Pink Peak Hold Cap
+                        let peakY = yForDB(peakDB, height: size.height)
+                        let capRect = CGRect(x: x, y: peakY - 1.5, width: barWidth, height: 2.5)
+                        ctx.fill(Path(roundedRect: capRect, cornerRadius: 1.0), with: .color(peakColor))
+
+                        if abs(f - selectedFrequency) < (usableWidth / Double(totalBars) * 20.0) {
+                            peakBarX = x + barWidth / 2
+                            peakBarY = peakY
+                        }
+                    }
+
+                    // Floating Dominant / Selected Frequency Callout
+                    let calloutX = peakBarX > 0 ? peakBarX : xForFreq(selectedFrequency, width: size.width)
+                    let calloutY = peakBarY < size.height ? peakBarY : yForDB(data.peakLevelDB, height: size.height)
+                    let callout = Text(String(format: "%.0f Hz", selectedFrequency))
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.white)
+                    ctx.draw(callout, at: CGPoint(x: min(size.width - 45, max(45, calloutX)), y: max(22, calloutY - 14)), anchor: .center)
+                }
+            }
+        }
+    }
+
+    private func xForFreq(_ freq: Double, width: CGFloat) -> CGFloat {
+        let minF = 20.0
+        let maxF = 20000.0
+        let clamped = max(minF, min(maxF, freq))
+        let logMin = log(minF)
+        let logMax = log(maxF)
+        let norm = (log(clamped) - logMin) / (logMax - logMin)
+        return 36 + CGFloat(norm) * (width - 44)
+    }
+
+    private func yForDB(_ db: Double, height: CGFloat) -> CGFloat {
+        let minDB = -20.0
+        let maxDB = 120.0
+        let clamped = max(minDB, min(maxDB, db))
+        let norm = (clamped - minDB) / (maxDB - minDB)
+        return height - (CGFloat(norm) * (height - 18) + 8)
+    }
+}
+
+// MARK: - Mode 2: Spectrum Line Canvas
+private struct SpectrumLineCanvas: View {
+    let curveData: SpectrumCurveData?
+    let selectedFrequency: Double
+    let weightingUnit: String
+
+    private let gridColor = Color(red: 0.16, green: 0.22, blue: 0.30)
+    private let pinkColor = Color(red: 0.94, green: 0.45, blue: 0.70)
+    private let greenColor = Color(red: 0.55, green: 0.88, blue: 0.25)
+
+    private let frequencyLabels: [(name: String, freq: Double)] = [
+        ("500", 500.0),
+        ("1K", 1000.0),
+        ("2K", 2000.0),
+        ("4K", 4000.0),
+        ("8K", 8000.0),
+        ("16K", 16000.0)
+    ]
+    private let dbMarkers: [Int] = [120, 100, 80, 60, 40, 20, 0, -20]
+
+    var body: some View {
+        GeometryReader { geo in
             Canvas { ctx, size in
                 // 1. Draw Grid Lines & Scale Markers
                 for db in dbMarkers {
@@ -594,7 +863,6 @@ private struct SpectrumChartCanvas: View {
                     line.addLine(to: CGPoint(x: size.width, y: y))
                     ctx.stroke(line, with: .color(gridColor), lineWidth: 0.8)
 
-                    // Y-Axis dB Labels
                     let labelText = db == 20 ? "20 \(weightingUnit)" : "\(db)"
                     let text = Text(labelText)
                         .font(.system(size: 8, weight: .medium))
@@ -646,7 +914,7 @@ private struct SpectrumChartCanvas: View {
                     }
                     ctx.stroke(pinkPath, with: .color(pinkColor), lineWidth: 1.6)
 
-                    // Draw Selected/Peak Frequency Callout directly above the curve
+                    // Draw Selected / Peak Frequency Callout
                     var curveLevel = data.peakLevelDB
                     if let closestIndex = data.frequencies.indices.min(by: { abs(data.frequencies[$0] - selectedFrequency) < abs(data.frequencies[$1] - selectedFrequency) }) {
                         curveLevel = max(data.instantaneousDB[closestIndex], data.peakHoldDB[closestIndex])
@@ -680,6 +948,311 @@ private struct SpectrumChartCanvas: View {
         let clamped = max(minDB, min(maxDB, db))
         let norm = (clamped - minDB) / (maxDB - minDB)
         return height - (CGFloat(norm) * (height - 18) + 8)
+    }
+}
+
+// MARK: - Mode 3: Waveform / Live Trend Canvas
+private struct WaveformTrendCanvas: View {
+    let samples: [Double]
+    let currentDB: Double
+    let weightingUnit: String
+
+    private let gridColor = Color(red: 0.16, green: 0.22, blue: 0.30)
+    private let lineColor = Color(red: 0.55, green: 0.88, blue: 0.25) // Lime green
+    private let dbMarkers: [Int] = [120, 100, 80, 60, 40, 20]
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .topTrailing) {
+                Canvas { ctx, size in
+                    // Horizontal dB grid lines
+                    for db in dbMarkers {
+                        let y = yForDB(Double(db), height: size.height)
+                        var line = Path()
+                        line.move(to: CGPoint(x: 32, y: y))
+                        line.addLine(to: CGPoint(x: size.width, y: y))
+                        ctx.stroke(line, with: .color(gridColor), lineWidth: 0.8)
+
+                        let labelText = db == 20 ? "20 \(weightingUnit)" : "\(db)"
+                        let text = Text(labelText)
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundColor(Color.white.opacity(0.4))
+                        ctx.draw(text, at: CGPoint(x: 18, y: y), anchor: .center)
+                    }
+
+                    // Vertical Time Divisions (every 25% of width)
+                    for frac in [0.25, 0.50, 0.75] {
+                        let x = 32 + CGFloat(frac) * (size.width - 32)
+                        var vLine = Path()
+                        vLine.move(to: CGPoint(x: x, y: 16))
+                        vLine.addLine(to: CGPoint(x: x, y: size.height))
+                        ctx.stroke(vLine, with: .color(gridColor.opacity(0.6)), lineWidth: 0.6)
+                    }
+
+                    // Render Scrolling Waveform
+                    guard samples.count > 1 else { return }
+                    let leftMargin: CGFloat = 36
+                    let usableWidth = size.width - leftMargin - 6
+                    let stepX = usableWidth / CGFloat(max(1, samples.count - 1))
+
+                    var path = Path()
+                    var areaPath = Path()
+                    let baselineY = yForDB(20.0, height: size.height)
+
+                    for (i, sample) in samples.enumerated() {
+                        let x = leftMargin + CGFloat(i) * stepX
+                        let y = yForDB(sample, height: size.height)
+                        if i == 0 {
+                            path.move(to: CGPoint(x: x, y: y))
+                            areaPath.move(to: CGPoint(x: x, y: baselineY))
+                            areaPath.addLine(to: CGPoint(x: x, y: y))
+                        } else {
+                            path.addLine(to: CGPoint(x: x, y: y))
+                            areaPath.addLine(to: CGPoint(x: x, y: y))
+                        }
+                    }
+
+                    if let last = samples.last {
+                        let lastX = leftMargin + CGFloat(samples.count - 1) * stepX
+                        areaPath.addLine(to: CGPoint(x: lastX, y: baselineY))
+                        areaPath.closeSubpath()
+
+                        // Shaded gradient fill
+                        let gradient = Gradient(colors: [lineColor.opacity(0.22), lineColor.opacity(0.01)])
+                        ctx.fill(areaPath, with: .linearGradient(gradient, startPoint: CGPoint(x: lastX, y: 0), endPoint: CGPoint(x: lastX, y: baselineY)))
+
+                        // Stroke live green line
+                        ctx.stroke(path, with: .color(lineColor), lineWidth: 2.0)
+
+                        // Glowing leading dot at current reading
+                        let dotY = yForDB(last, height: size.height)
+                        let dotRect = CGRect(x: lastX - 4, y: dotY - 4, width: 8, height: 8)
+                        ctx.fill(Path(ellipseIn: dotRect), with: .color(lineColor))
+                    }
+                }
+
+                // Top right "LIVE" indicator badge
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(lineColor)
+                        .frame(width: 6, height: 6)
+                    Text("LIVE")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.black.opacity(0.6), in: Capsule())
+                .overlay(Capsule().stroke(Color.white.opacity(0.12), lineWidth: 0.8))
+                .padding(.trailing, 10)
+                .padding(.top, 10)
+            }
+        }
+    }
+
+    private func yForDB(_ db: Double, height: CGFloat) -> CGFloat {
+        let minDB = 20.0
+        let maxDB = 130.0
+        let clamped = max(minDB, min(maxDB, db))
+        let norm = (clamped - minDB) / (maxDB - minDB)
+        return height - (CGFloat(norm) * (height - 24) + 12)
+    }
+}
+
+// MARK: - Mode 4: History Graph Canvas
+private struct HistoryGraphCanvas: View {
+    let samples: [Double]
+    let minDB: Double
+    let maxDB: Double
+    let avgDB: Double
+    let weightingUnit: String
+
+    private let gridColor = Color(red: 0.16, green: 0.22, blue: 0.30)
+    private let trendColor = Color(red: 0.22, green: 0.74, blue: 0.98) // Cyan blue
+    private let minColor = Color(red: 0.22, green: 0.65, blue: 0.98) // Blue
+    private let maxColor = Color(red: 0.98, green: 0.44, blue: 0.16) // Orange
+    private let dbMarkers: [Int] = [120, 100, 80, 60, 40, 20]
+
+    var body: some View {
+        GeometryReader { geo in
+            Canvas { ctx, size in
+                // Horizontal dB grid lines
+                for db in dbMarkers {
+                    let y = yForDB(Double(db), height: size.height)
+                    var line = Path()
+                    line.move(to: CGPoint(x: 32, y: y))
+                    line.addLine(to: CGPoint(x: size.width, y: y))
+                    ctx.stroke(line, with: .color(gridColor), lineWidth: 0.8)
+
+                    let labelText = db == 20 ? "20 \(weightingUnit)" : "\(db)"
+                    let text = Text(labelText)
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(Color.white.opacity(0.4))
+                    ctx.draw(text, at: CGPoint(x: 18, y: y), anchor: .center)
+                }
+
+                // Time labels across bottom
+                let timeLabels = ["0s", "15s", "30s", "45s", "60s"]
+                for (idx, tl) in timeLabels.enumerated() {
+                    let frac = CGFloat(idx) / CGFloat(timeLabels.count - 1)
+                    let x = 36 + frac * (size.width - 56)
+                    let tText = Text(tl)
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(Color.white.opacity(0.4))
+                    ctx.draw(tText, at: CGPoint(x: x, y: size.height - 6), anchor: .center)
+                }
+
+                // Min indicator line (blue dashed)
+                if minDB > 20 {
+                    let y = yForDB(minDB, height: size.height)
+                    var minLine = Path()
+                    minLine.move(to: CGPoint(x: 36, y: y))
+                    minLine.addLine(to: CGPoint(x: size.width - 48, y: y))
+                    ctx.stroke(minLine, with: .color(minColor.opacity(0.8)), style: StrokeStyle(lineWidth: 1.0, dash: [4, 4]))
+
+                    let minBadge = Text(String(format: "MIN %.1f", minDB))
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(minColor)
+                    ctx.draw(minBadge, at: CGPoint(x: size.width - 24, y: y), anchor: .center)
+                }
+
+                // Max indicator line (orange dashed)
+                if maxDB > 20 {
+                    let y = yForDB(maxDB, height: size.height)
+                    var maxLine = Path()
+                    maxLine.move(to: CGPoint(x: 36, y: y))
+                    maxLine.addLine(to: CGPoint(x: size.width - 48, y: y))
+                    ctx.stroke(maxLine, with: .color(maxColor.opacity(0.85)), style: StrokeStyle(lineWidth: 1.0, dash: [4, 4]))
+
+                    let maxBadge = Text(String(format: "MAX %.1f", maxDB))
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(maxColor)
+                    ctx.draw(maxBadge, at: CGPoint(x: size.width - 24, y: y), anchor: .center)
+                }
+
+                // Avg indicator line (white dotted)
+                if avgDB > 20 {
+                    let y = yForDB(avgDB, height: size.height)
+                    var avgLine = Path()
+                    avgLine.move(to: CGPoint(x: 36, y: y))
+                    avgLine.addLine(to: CGPoint(x: size.width, y: y))
+                    ctx.stroke(avgLine, with: .color(Color.white.opacity(0.4)), style: StrokeStyle(lineWidth: 0.8, dash: [2, 3]))
+                }
+
+                // Plot Trend Curve
+                guard samples.count > 1 else { return }
+                let leftMargin: CGFloat = 36
+                let usableWidth = size.width - leftMargin - 12
+                let stepX = usableWidth / CGFloat(max(1, samples.count - 1))
+
+                var trendPath = Path()
+                for (i, dbfs) in samples.enumerated() {
+                    let db = max(20.0, min(130.0, dbfs + 100.0))
+                    let x = leftMargin + CGFloat(i) * stepX
+                    let y = yForDB(db, height: size.height)
+                    if i == 0 {
+                        trendPath.move(to: CGPoint(x: x, y: y))
+                    } else {
+                        trendPath.addLine(to: CGPoint(x: x, y: y))
+                    }
+                }
+                ctx.stroke(trendPath, with: .color(trendColor), lineWidth: 1.8)
+            }
+        }
+    }
+
+    private func yForDB(_ db: Double, height: CGFloat) -> CGFloat {
+        let minDB = 20.0
+        let maxDB = 130.0
+        let clamped = max(minDB, min(maxDB, db))
+        let norm = (clamped - minDB) / (maxDB - minDB)
+        return height - (CGFloat(norm) * (height - 30) + 16)
+    }
+}
+
+// MARK: - Mode 5: Spectrogram Waterfall Canvas
+private struct SpectrogramCanvas: View {
+    let history: [SpectrogramSlice]
+    let weightingUnit: String
+
+    private let gridColor = Color(red: 0.16, green: 0.22, blue: 0.30)
+    private let freqLabels = ["16K", "8K", "4K", "2K", "1K", "500", "100"]
+
+    var body: some View {
+        GeometryReader { geo in
+            Canvas { ctx, size in
+                // Left margin for frequency labels
+                let leftMargin: CGFloat = 32
+                let bottomMargin: CGFloat = 16
+                let topMargin: CGFloat = 14
+                let usableWidth = size.width - leftMargin - 4
+                let usableHeight = size.height - topMargin - bottomMargin
+
+                // Frequency labels on left axis
+                for (i, f) in freqLabels.enumerated() {
+                    let frac = CGFloat(i) / CGFloat(freqLabels.count - 1)
+                    let y = topMargin + frac * usableHeight
+                    let text = Text(f)
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(Color.white.opacity(0.45))
+                    ctx.draw(text, at: CGPoint(x: 16, y: y), anchor: .center)
+
+                    var hLine = Path()
+                    hLine.move(to: CGPoint(x: leftMargin, y: y))
+                    hLine.addLine(to: CGPoint(x: size.width, y: y))
+                    ctx.stroke(hLine, with: .color(gridColor.opacity(0.4)), lineWidth: 0.5)
+                }
+
+                // Time labels across bottom
+                let times = ["-20s", "-15s", "-10s", "-5s", "Now"]
+                for (i, t) in times.enumerated() {
+                    let frac = CGFloat(i) / CGFloat(times.count - 1)
+                    let x = leftMargin + frac * usableWidth
+                    let text = Text(t)
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(Color.white.opacity(0.4))
+                    ctx.draw(text, at: CGPoint(x: x, y: size.height - 8), anchor: .center)
+                }
+
+                // Render Heatmap Matrix
+                guard !history.isEmpty else { return }
+                let sliceWidth = max(2.0, usableWidth / CGFloat(history.count))
+
+                for (sIdx, slice) in history.enumerated() {
+                    let x = leftMargin + CGFloat(sIdx) * sliceWidth
+                    let binCount = slice.magnitudes.count
+                    guard binCount > 0 else { continue }
+                    let binHeight = usableHeight / CGFloat(binCount)
+
+                    for (bIdx, mag) in slice.magnitudes.enumerated() {
+                        // High frequencies at top, low frequencies at bottom
+                        let y = topMargin + CGFloat(binCount - 1 - bIdx) * binHeight
+                        let cellRect = CGRect(x: x, y: y, width: sliceWidth + 0.5, height: binHeight + 0.5)
+                        let color = colorForMagnitude(mag)
+                        ctx.fill(Path(cellRect), with: .color(color))
+                    }
+                }
+            }
+        }
+    }
+
+    private func colorForMagnitude(_ mag: Float) -> Color {
+        let m = max(0.0, min(1.0, Double(mag)))
+        if m < 0.15 {
+            return Color(red: 0.04, green: 0.08, blue: 0.18).opacity(0.9)
+        } else if m < 0.35 {
+            let t = (m - 0.15) / 0.20
+            return Color(red: 0.04 + 0.05 * t, green: 0.15 + 0.55 * t, blue: 0.40 + 0.50 * t) // Cyan blue
+        } else if m < 0.60 {
+            let t = (m - 0.35) / 0.25
+            return Color(red: 0.09 + 0.45 * t, green: 0.70 + 0.25 * t, blue: 0.90 - 0.65 * t) // Lime green
+        } else if m < 0.85 {
+            let t = (m - 0.60) / 0.25
+            return Color(red: 0.54 + 0.44 * t, green: 0.95 - 0.10 * t, blue: 0.25 - 0.15 * t) // Golden yellow
+        } else {
+            let t = (m - 0.85) / 0.15
+            return Color(red: 0.98, green: 0.85 - 0.55 * t, blue: 0.10 + 0.10 * t) // Orange red
+        }
     }
 }
 

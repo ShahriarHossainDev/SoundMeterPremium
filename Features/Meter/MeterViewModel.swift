@@ -26,6 +26,36 @@ public enum EnvironmentProfile: String, CaseIterable, Identifiable {
     }
 }
 
+public enum MeterVisualizationMode: String, CaseIterable, Identifiable {
+    case spectrumBars = "Bars"
+    case spectrumLine = "Line"
+    case waveform = "Waveform"
+    case historyGraph = "History"
+    case spectrogram = "Spectrogram"
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .spectrumBars: return "Spectrum Bars"
+        case .spectrumLine: return "Spectrum Line"
+        case .waveform: return "Live Waveform"
+        case .historyGraph: return "History Graph"
+        case .spectrogram: return "Spectrogram"
+        }
+    }
+
+    public var icon: String {
+        switch self {
+        case .spectrumBars: return "chart.bar.fill"
+        case .spectrumLine: return "waveform.path.ecg"
+        case .waveform: return "waveform"
+        case .historyGraph: return "chart.xyaxis.line"
+        case .spectrogram: return "square.grid.3x3.fill"
+        }
+    }
+}
+
 @MainActor
 final class MeterViewModel: ObservableObject {
     @Published private(set) var state: MeterState = .idle
@@ -87,7 +117,10 @@ final class MeterViewModel: ObservableObject {
     }
 
     // Real-time FFT spectrum data (Accelerate vDSP)
+    @Published var visualizationMode: MeterVisualizationMode = .spectrumBars
     @Published private(set) var spectrumCurveData: SpectrumCurveData?
+    @Published private(set) var spectrogramHistory: [SpectrogramSlice] = []
+    @Published private(set) var waveformSamples: [Double] = []
     @Published var selectedFrequency: Double?
     @Published var environmentProfile: EnvironmentProfile = .quietHome
 
@@ -124,6 +157,7 @@ final class MeterViewModel: ObservableObject {
 
         let offset = UserDefaults.standard.double(forKey: "microphoneGainOffset")
         self.spectrumCurveData = spectrumAnalyzer.defaultCurves(weighting: initialWeighting, gainOffset: offset)
+        self.spectrogramHistory = spectrumAnalyzer.defaultSpectrogramHistory()
 
         // Seed initial baseline stats matching the standard quiet home reference
         self.currentDBFS = -48.5
@@ -132,12 +166,68 @@ final class MeterViewModel: ObservableObject {
         self.minimumDBFS = -57.3
         self.elapsed = 56.0
 
+        // Seed baseline waveform and graph samples
+        var initialWave: [Double] = []
+        for i in 0..<120 {
+            let t = Double(i) / 10.0
+            let v = 51.5 + sin(t * 1.8) * 2.2 + cos(t * 3.4) * 1.1
+            initialWave.append(v)
+        }
+        self.waveformSamples = initialWave
+        self.graphSamples = Array(repeating: -48.5, count: 40)
+
         capture.onLevel = { [weak self] level, duration in
             Task { @MainActor in self?.consume(level, duration: duration) }
         }
 
         capture.onSamples = { [weak self] samples, sampleRate in
-            Task { @MainActor in self?.consumeSamples(samples, sampleRate: sampleRate) }
+            guard let self else { return }
+            // Run Accelerate vDSP FFT processing on background thread
+            Task.detached(priority: .userInitiated) { [weak self] in
+                guard let self else { return }
+                let offset = UserDefaults.standard.double(forKey: "microphoneGainOffset")
+                let weighting = await self.weighting
+                let curve = await self.spectrumAnalyzer.analyzeCurves(
+                    samples: samples,
+                    sampleRate: sampleRate,
+                    pointCount: 128,
+                    weighting: weighting,
+                    gainOffset: offset
+                )
+                let slice = await self.spectrumAnalyzer.analyzeSpectrogramSlice(
+                    samples: samples,
+                    sampleRate: sampleRate,
+                    binCount: 36,
+                    weighting: weighting,
+                    gainOffset: offset
+                )
+                if curve != nil || slice != nil {
+                    Task { @MainActor [weak self] in
+                        self?.receiveAnalysis(curve: curve, slice: slice)
+                    }
+                }
+            }
+        }
+    }
+
+    func cycleVisualizationMode() {
+        let all = MeterVisualizationMode.allCases
+        if let idx = all.firstIndex(of: visualizationMode) {
+            visualizationMode = all[(idx + 1) % all.count]
+        }
+    }
+
+    func nextVisualizationMode() {
+        let all = MeterVisualizationMode.allCases
+        if let idx = all.firstIndex(of: visualizationMode) {
+            visualizationMode = all[(idx + 1) % all.count]
+        }
+    }
+
+    func previousVisualizationMode() {
+        let all = MeterVisualizationMode.allCases
+        if let idx = all.firstIndex(of: visualizationMode) {
+            visualizationMode = all[(idx - 1 + all.count) % all.count]
         }
     }
 
@@ -223,6 +313,14 @@ final class MeterViewModel: ObservableObject {
         smoothedPower = nil
         selectedFrequency = nil
         spectrumAnalyzer.resetPeakHold()
+        var initialWave: [Double] = []
+        for i in 0..<120 {
+            let t = Double(i) / 10.0
+            let v = 51.5 + sin(t * 1.8) * 2.2 + cos(t * 3.4) * 1.1
+            initialWave.append(v)
+        }
+        waveformSamples = initialWave
+        spectrogramHistory = spectrumAnalyzer.defaultSpectrogramHistory()
     }
 
     func selectNextFrequency() {
@@ -299,30 +397,34 @@ final class MeterViewModel: ObservableObject {
         maximumDBFS = max(maximumDBFS, displayedLevel)
         minimumDBFS = levels.count == 1 ? displayedLevel : min(minimumDBFS, displayedLevel)
 
+        // Store live scrolling waveform samples (bounded to 160 points)
+        let acousticCurrent = max(20.0, min(130.0, displayedLevel + 100.0 + offset))
+        waveformSamples.append(acousticCurrent)
+        if waveformSamples.count > 160 { waveformSamples.removeFirst() }
+
         // Store time series display graph
         if Date.now.timeIntervalSince(lastGraphUpdate) >= 0.25 {
             graphSamples.append(displayedLevel)
-            if graphSamples.count > 180 { graphSamples.removeFirst() }
+            if graphSamples.count > 300 { graphSamples.removeFirst() }
             lastGraphUpdate = .now
         }
     }
 
-    private func consumeSamples(_ samples: [Float], sampleRate: Double) {
+    private func receiveAnalysis(curve: SpectrumCurveData?, slice: SpectrogramSlice?) {
         guard state == .measuring else { return }
         let now = Date.now
         // Throttle UI spectrum updates to ~30 FPS
         guard now.timeIntervalSince(lastSpectrumUpdate) >= 0.033 else { return }
         lastSpectrumUpdate = now
 
-        let offset = UserDefaults.standard.double(forKey: "microphoneGainOffset")
-        if let curve = spectrumAnalyzer.analyzeCurves(
-            samples: samples,
-            sampleRate: sampleRate,
-            pointCount: 128,
-            weighting: weighting,
-            gainOffset: offset
-        ) {
+        if let curve {
             self.spectrumCurveData = curve
+        }
+        if let slice {
+            self.spectrogramHistory.append(slice)
+            if self.spectrogramHistory.count > 65 {
+                self.spectrogramHistory.removeFirst()
+            }
         }
     }
 
