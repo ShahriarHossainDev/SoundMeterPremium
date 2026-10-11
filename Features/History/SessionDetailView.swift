@@ -55,20 +55,35 @@ struct SessionDetailView: View {
                     }
                 }
 
-                Button {
-                    do {
-                        exportURL = try CSVExporter.export(session: session)
-                        showingShare = true
-                    } catch {
-                        exportError = error.localizedDescription
+                VStack(spacing: 10) {
+                    Button {
+                        do {
+                            exportURL = try PDFExporter.export(session: session)
+                            showingShare = true
+                        } catch {
+                            exportError = error.localizedDescription
+                        }
+                    } label: {
+                        Label("Export PDF Report", systemImage: "doc.richtext.fill")
+                            .frame(maxWidth: .infinity).padding(.vertical, 13)
                     }
-                } label: {
-                    Label("Export CSV", systemImage: "square.and.arrow.up")
-                        .frame(maxWidth: .infinity).padding(.vertical, 13)
+                    .buttonStyle(.borderedProminent)
+                    .tint(AppTheme.accent)
+                    .foregroundStyle(.black)
+
+                    Button {
+                        do {
+                            exportURL = try CSVExporter.export(session: session)
+                            showingShare = true
+                        } catch {
+                            exportError = error.localizedDescription
+                        }
+                    } label: {
+                        Label("Export Raw CSV Data", systemImage: "tablecells")
+                            .frame(maxWidth: .infinity).padding(.vertical, 13)
+                    }
+                    .buttonStyle(.bordered)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(AppTheme.accent)
-                .foregroundStyle(.black)
 
                 if let exportError {
                     Text(exportError).font(.footnote).foregroundStyle(.red)
