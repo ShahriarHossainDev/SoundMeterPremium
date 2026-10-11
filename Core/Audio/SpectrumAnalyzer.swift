@@ -95,16 +95,19 @@ final class SpectrumAnalyzer: @unchecked Sendable {
             peakDB.append(peak)
         }
 
+        let peakHoldEnabled = UserDefaults.standard.object(forKey: "peakHoldEnabled") as? Bool ?? true
+        let safePeakDB = peakHoldEnabled ? peakDB : instDB
+
         lock.lock()
         if peakHold.count != pointCount {
-            peakHold = peakDB
+            peakHold = safePeakDB
         }
         lock.unlock()
 
         return SpectrumCurveData(
             frequencies: freqs,
             instantaneousDB: instDB,
-            peakHoldDB: peakDB,
+            peakHoldDB: safePeakDB,
             dominantFrequency: 2532.0,
             peakLevelDB: 56.5 + gainOffset
         )
@@ -168,7 +171,10 @@ final class SpectrumAnalyzer: @unchecked Sendable {
             instDB.append(displayDB)
         }
 
-        if peakHold.count != pointCount {
+        let peakHoldEnabled = UserDefaults.standard.object(forKey: "peakHoldEnabled") as? Bool ?? true
+        if !peakHoldEnabled {
+            peakHold = instDB
+        } else if peakHold.count != pointCount {
             peakHold = instDB
         } else {
             for i in 0..<pointCount {

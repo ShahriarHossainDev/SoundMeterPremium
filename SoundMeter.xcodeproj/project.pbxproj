@@ -459,6 +459,7 @@
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "SoundMeter uses the camera to capture photos and videos with your sound measurements.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "SoundMeter uses your location to optionally stamp your city onto captured photos and videos.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SoundMeter uses the microphone to estimate environmental sound levels while you use the meter.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "SoundMeter saves captured photos and videos to your Photos library when you choose Save to Photos.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -479,6 +480,7 @@
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSCameraUsageDescription = "SoundMeter uses the camera to capture photos and videos with your sound measurements.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "SoundMeter uses your location to optionally stamp your city onto captured photos and videos.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "SoundMeter uses the microphone to estimate environmental sound levels while you use the meter.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "SoundMeter saves captured photos and videos to your Photos library when you choose Save to Photos.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;

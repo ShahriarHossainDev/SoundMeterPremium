@@ -16,6 +16,7 @@ struct MeterView: View {
 
     @AppStorage("noiseAlertEnabled") private var noiseAlertEnabled = false
     @AppStorage("noiseAlertThreshold") private var noiseAlertThreshold = -12.0
+    @AppStorage("showSpectrumPeaks") private var showSpectrumPeaks = true
 
     // Theme tokens matching screenshot
     private let darkBackground = Color(red: 0.04, green: 0.06, blue: 0.09) // #0A0F17
@@ -74,6 +75,7 @@ struct MeterView: View {
         .preferredColorScheme(.dark)
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
+            model.reloadConfiguration()
             model.start()
         }
         .sheet(isPresented: $showingSave) {
@@ -143,13 +145,15 @@ struct MeterView: View {
                     SpectrumBarsCanvas(
                         curveData: model.spectrumCurveData,
                         selectedFrequency: model.displayedFrequency,
-                        weightingUnit: model.unitSymbol
+                        weightingUnit: model.unitSymbol,
+                        showPeaks: showSpectrumPeaks
                     )
                 case .spectrumLine:
                     SpectrumLineCanvas(
                         curveData: model.spectrumCurveData,
                         selectedFrequency: model.displayedFrequency,
-                        weightingUnit: model.unitSymbol
+                        weightingUnit: model.unitSymbol,
+                        showPeaks: showSpectrumPeaks
                     )
                 case .waveform:
                     WaveformTrendCanvas(
@@ -737,6 +741,7 @@ private struct SpectrumBarsCanvas: View {
     let curveData: SpectrumCurveData?
     let selectedFrequency: Double
     let weightingUnit: String
+    var showPeaks: Bool = true
 
     private let gridColor = Color(red: 0.16, green: 0.22, blue: 0.30)
     private let barColor = Color(red: 0.55, green: 0.88, blue: 0.25) // Lime green
@@ -811,24 +816,28 @@ private struct SpectrumBarsCanvas: View {
                         let barPath = Path(roundedRect: barRect, cornerRadius: 1.5)
                         ctx.fill(barPath, with: .color(barColor))
 
-                        // Draw Pink Peak Hold Cap
-                        let peakY = yForDB(peakDB, height: size.height)
-                        let capRect = CGRect(x: x, y: peakY - 1.5, width: barWidth, height: 2.5)
-                        ctx.fill(Path(roundedRect: capRect, cornerRadius: 1.0), with: .color(peakColor))
+                        if showPeaks {
+                            // Draw Pink Peak Hold Cap
+                            let peakY = yForDB(peakDB, height: size.height)
+                            let capRect = CGRect(x: x, y: peakY - 1.5, width: barWidth, height: 2.5)
+                            ctx.fill(Path(roundedRect: capRect, cornerRadius: 1.0), with: .color(peakColor))
+                        }
 
                         if abs(f - selectedFrequency) < (usableWidth / Double(totalBars) * 20.0) {
                             peakBarX = x + barWidth / 2
-                            peakBarY = peakY
+                            peakBarY = yForDB(peakDB, height: size.height)
                         }
                     }
 
-                    // Floating Dominant / Selected Frequency Callout
-                    let calloutX = peakBarX > 0 ? peakBarX : xForFreq(selectedFrequency, width: size.width)
-                    let calloutY = peakBarY < size.height ? peakBarY : yForDB(data.peakLevelDB, height: size.height)
-                    let callout = Text(String(format: "%.0f Hz", selectedFrequency))
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white)
-                    ctx.draw(callout, at: CGPoint(x: min(size.width - 45, max(45, calloutX)), y: max(22, calloutY - 14)), anchor: .center)
+                    if showPeaks {
+                        // Floating Dominant / Selected Frequency Callout
+                        let calloutX = peakBarX > 0 ? peakBarX : xForFreq(selectedFrequency, width: size.width)
+                        let calloutY = peakBarY < size.height ? peakBarY : yForDB(data.peakLevelDB, height: size.height)
+                        let callout = Text(String(format: "%.0f Hz", selectedFrequency))
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white)
+                        ctx.draw(callout, at: CGPoint(x: min(size.width - 45, max(45, calloutX)), y: max(22, calloutY - 14)), anchor: .center)
+                    }
                 }
             }
         }
@@ -858,6 +867,7 @@ private struct SpectrumLineCanvas: View {
     let curveData: SpectrumCurveData?
     let selectedFrequency: Double
     let weightingUnit: String
+    var showPeaks: Bool = true
 
     private let gridColor = Color(red: 0.16, green: 0.22, blue: 0.30)
     private let pinkColor = Color(red: 0.94, green: 0.45, blue: 0.70)
@@ -922,31 +932,33 @@ private struct SpectrumLineCanvas: View {
                     }
                     ctx.stroke(greenPath, with: .color(greenColor), lineWidth: 1.5)
 
-                    // Draw Pink Peak Hold Curve
-                    var pinkPath = Path()
-                    for i in 0..<count {
-                        let x = xForFreq(data.frequencies[i], width: size.width)
-                        let y = yForDB(data.peakHoldDB[i], height: size.height)
-                        if i == 0 {
-                            pinkPath.move(to: CGPoint(x: x, y: y))
-                        } else {
-                            pinkPath.addLine(to: CGPoint(x: x, y: y))
+                    if showPeaks {
+                        // Draw Pink Peak Hold Curve
+                        var pinkPath = Path()
+                        for i in 0..<count {
+                            let x = xForFreq(data.frequencies[i], width: size.width)
+                            let y = yForDB(data.peakHoldDB[i], height: size.height)
+                            if i == 0 {
+                                pinkPath.move(to: CGPoint(x: x, y: y))
+                            } else {
+                                pinkPath.addLine(to: CGPoint(x: x, y: y))
+                            }
                         }
-                    }
-                    ctx.stroke(pinkPath, with: .color(pinkColor), lineWidth: 1.6)
+                        ctx.stroke(pinkPath, with: .color(pinkColor), lineWidth: 1.6)
 
-                    // Draw Selected / Peak Frequency Callout
-                    var curveLevel = data.peakLevelDB
-                    if let closestIndex = data.frequencies.indices.min(by: { abs(data.frequencies[$0] - selectedFrequency) < abs(data.frequencies[$1] - selectedFrequency) }) {
-                        curveLevel = max(data.instantaneousDB[closestIndex], data.peakHoldDB[closestIndex])
-                    }
-                    let peakX = xForFreq(selectedFrequency, width: size.width)
-                    let peakY = yForDB(curveLevel, height: size.height)
+                        // Draw Selected / Peak Frequency Callout
+                        var curveLevel = data.peakLevelDB
+                        if let closestIndex = data.frequencies.indices.min(by: { abs(data.frequencies[$0] - selectedFrequency) < abs(data.frequencies[$1] - selectedFrequency) }) {
+                            curveLevel = max(data.instantaneousDB[closestIndex], data.peakHoldDB[closestIndex])
+                        }
+                        let peakX = xForFreq(selectedFrequency, width: size.width)
+                        let peakY = yForDB(curveLevel, height: size.height)
 
-                    let callout = Text(String(format: "%.0f Hz", selectedFrequency))
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white)
-                    ctx.draw(callout, at: CGPoint(x: min(size.width - 45, max(45, peakX)), y: max(22, peakY - 14)), anchor: .center)
+                        let callout = Text(String(format: "%.0f Hz", selectedFrequency))
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.white)
+                        ctx.draw(callout, at: CGPoint(x: min(size.width - 45, max(45, peakX)), y: max(22, peakY - 14)), anchor: .center)
+                    }
                 }
             }
         }

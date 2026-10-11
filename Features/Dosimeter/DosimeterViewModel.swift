@@ -11,22 +11,25 @@ final class DosimeterViewModel: ObservableObject {
     @Published private(set) var projectedDose: Double = 0.0
     @Published private(set) var thresholdItems: [ExposureThresholdItem] = []
 
-    @Published var selectedStandard: DosimeterStandard = .niosh {
+    @Published var selectedStandard: DosimeterStandard {
         didSet {
             calculator.setStandard(selectedStandard)
             threshold = calculator.threshold
             exchangeRate = calculator.exchangeRate
             thresholdItems = calculator.thresholdItems
+            UserDefaults.standard.set(selectedStandard.id, forKey: "dosimeterStandardID")
+            UserDefaults.standard.set(calculator.threshold, forKey: "dosimeterThreshold")
         }
     }
 
-    @Published var threshold: Double = 80.0 {
+    @Published var threshold: Double {
         didSet {
             calculator.threshold = threshold
+            UserDefaults.standard.set(threshold, forKey: "dosimeterThreshold")
         }
     }
 
-    @Published var exchangeRate: Double = 3.0 {
+    @Published var exchangeRate: Double {
         didSet {
             calculator.exchangeRate = exchangeRate
             calculator.rebuildThresholdItems()
@@ -37,14 +40,22 @@ final class DosimeterViewModel: ObservableObject {
     @Published private(set) var isMeasuring: Bool = false
     @Published var errorMessage: String?
 
-    private let calculator = DosimeterCalculator(standard: .niosh)
+    private let calculator: DosimeterCalculator
     private let capture = AudioCaptureService()
     private var smoothedInstantaneous: Double?
 
     init() {
-        self.threshold = calculator.threshold
-        self.exchangeRate = calculator.exchangeRate
-        self.thresholdItems = calculator.thresholdItems
+        let savedStandardID = UserDefaults.standard.string(forKey: "dosimeterStandardID") ?? "niosh"
+        let standard = DosimeterStandard.allStandards.first(where: { $0.id == savedStandardID }) ?? .niosh
+        let calc = DosimeterCalculator(standard: standard)
+        let savedThreshold = UserDefaults.standard.object(forKey: "dosimeterThreshold") as? Double ?? standard.defaultThreshold
+        calc.threshold = savedThreshold
+
+        self.calculator = calc
+        self.selectedStandard = standard
+        self.threshold = savedThreshold
+        self.exchangeRate = calc.exchangeRate
+        self.thresholdItems = calc.thresholdItems
         self.capture.weighting = .a // NIOSH and OSHA standards require A-weighting
 
         self.capture.onLevel = { [weak self] rawDBFS, duration in
@@ -58,8 +69,20 @@ final class DosimeterViewModel: ObservableObject {
         capture.stop()
     }
 
+    func reloadConfiguration() {
+        let savedStandardID = UserDefaults.standard.string(forKey: "dosimeterStandardID") ?? "niosh"
+        if let standard = DosimeterStandard.allStandards.first(where: { $0.id == savedStandardID }), standard != selectedStandard {
+            selectedStandard = standard
+        }
+        let savedThreshold = UserDefaults.standard.object(forKey: "dosimeterThreshold") as? Double ?? selectedStandard.defaultThreshold
+        if savedThreshold != threshold {
+            threshold = savedThreshold
+        }
+    }
+
     func start() {
         guard !isMeasuring else { return }
+        reloadConfiguration()
         errorMessage = nil
         capture.weighting = .a
 
@@ -122,7 +145,7 @@ final class DosimeterViewModel: ObservableObject {
         if hours > 0 {
             return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
         } else {
-            return String(format: "%02d:%02d", minutes, seconds)
+            return String(format: "%02d:%02d:%02d", minutes, seconds)
         }
     }
 }

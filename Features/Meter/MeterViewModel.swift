@@ -166,7 +166,7 @@ final class MeterViewModel: ObservableObject {
     private var smoothedPower: Double?
     private let noiseAlert = NoiseAlertManager()
 
-    private let standardFrequencies: [Double] = [
+        private let standardFrequencies: [Double] = [
         46.0, 96.0, 125.0, 250.0, 500.0, 1000.0, 2000.0, 2532.0, 4000.0, 8000.0, 16000.0
     ]
 
@@ -266,6 +266,17 @@ final class MeterViewModel: ObservableObject {
         weighting = newWeighting
     }
 
+    func reloadConfiguration() {
+        let savedWeighting = UserDefaults.standard.string(forKey: "defaultWeighting") ?? "A"
+        if let w = FrequencyWeighting(rawValue: savedWeighting), w != weighting {
+            setWeighting(w)
+        }
+        let peakHoldEnabled = UserDefaults.standard.object(forKey: "peakHoldEnabled") as? Bool ?? true
+        if !peakHoldEnabled {
+            spectrumAnalyzer.resetPeakHold()
+        }
+    }
+
     func togglePauseResume() {
         if state == .measuring {
             pause()
@@ -278,6 +289,7 @@ final class MeterViewModel: ObservableObject {
 
     func start() {
         guard state == .idle || state == .paused || state == .failed || state == .stopped else { return }
+        reloadConfiguration()
         if UserDefaults.standard.bool(forKey: "noiseAlertEnabled") {
             noiseAlert.requestPermissionIfNeeded()
         }
@@ -306,7 +318,6 @@ final class MeterViewModel: ObservableObject {
         guard state == .measuring else { return }
         capture.stop()
         timer?.invalidate()
-        timer = nil
         pauseStarted = .now
         state = .paused
     }
@@ -315,34 +326,31 @@ final class MeterViewModel: ObservableObject {
         guard state == .measuring || state == .paused else { return }
         capture.stop()
         timer?.invalidate()
-        timer = nil
         if let pauseStarted {
             pausedDuration += Date.now.timeIntervalSince(pauseStarted)
             self.pauseStarted = nil
         }
-        updateElapsed()
         state = .stopped
     }
 
     func reset() {
         capture.stop()
         timer?.invalidate()
-        timer = nil
         state = .idle
-        currentDBFS = -120
-        averageDBFS = -120
-        maximumDBFS = -120
-        minimumDBFS = -120
-        elapsed = 0
-        graphSamples = []
-        levels = []
+        currentDBFS = -120.0
+        averageDBFS = -120.0
+        maximumDBFS = -120.0
+        minimumDBFS = -120.0
+        elapsed = 0.0
         sessionStart = nil
-        pausedDuration = 0
         pauseStarted = nil
-        errorMessage = nil
+        pausedDuration = 0.0
+        levels.removeAll()
+        graphSamples.removeAll()
         smoothedPower = nil
-        selectedFrequency = nil
         spectrumAnalyzer.resetPeakHold()
+
+        // Restore clean baseline waveform and initial spectrogram state
         var initialWave: [Double] = []
         for i in 0..<120 {
             let t = Double(i) / 10.0

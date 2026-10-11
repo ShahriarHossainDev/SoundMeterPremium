@@ -4,15 +4,82 @@ import Photos
 import UIKit
 import Combine
 import CoreImage
+import CoreLocation
 import SwiftUI
 
 // MARK: - Models & Enums
 
 struct OverlaySettings: Equatable, Codable {
     var showSoundLevel: Bool = true
-    var showStatistics: Bool = true
+    var showAverage: Bool = true
+    var showMinimum: Bool = true
+    var showMaximum: Bool = true
+    var showPeak: Bool = true
+    var showDuration: Bool = true
     var showTimestamp: Bool = true
+    var showLocation: Bool = false
     var showWatermark: Bool = true
+    var useAcousticScale: Bool = true
+
+    var showStatistics: Bool {
+        showAverage || showMinimum || showMaximum || showPeak
+    }
+
+    private static let userDefaultsKey = "com.soundmeter.overlaySettings.v2"
+
+    static func load() -> OverlaySettings {
+        if let data = UserDefaults.standard.data(forKey: userDefaultsKey),
+           let settings = try? JSONDecoder().decode(OverlaySettings.self, from: data) {
+            return settings
+        }
+        return OverlaySettings()
+    }
+
+    func save() {
+        if let data = try? JSONEncoder().encode(self) {
+            UserDefaults.standard.set(data, forKey: OverlaySettings.userDefaultsKey)
+        }
+    }
+}
+
+enum CameraAspectRatio: String, CaseIterable, Identifiable, Codable {
+    case ratio4_3 = "4:3"
+    case ratio16_9 = "16:9"
+    case ratio1_1 = "1:1"
+
+    var id: String { rawValue }
+
+    var widthRatio: CGFloat {
+        switch self {
+        case .ratio4_3: return 3.0 / 4.0
+        case .ratio16_9: return 9.0 / 16.0
+        case .ratio1_1: return 1.0
+        }
+    }
+
+    var heightMultiplier: CGFloat {
+        switch self {
+        case .ratio4_3: return 4.0 / 3.0
+        case .ratio16_9: return 16.0 / 9.0
+        case .ratio1_1: return 1.0
+        }
+    }
+}
+
+enum CameraFlashMode: String, CaseIterable, Identifiable {
+    case auto = "Auto"
+    case on = "On"
+    case off = "Off"
+
+    var id: String { rawValue }
+
+    var iconName: String {
+        switch self {
+        case .auto: return "bolt.badge.automatic"
+        case .on: return "bolt.fill"
+        case .off: return "bolt.slash.fill"
+        }
+    }
 }
 
 enum CameraFilter: String, CaseIterable, Identifiable, Codable {
@@ -21,6 +88,7 @@ enum CameraFilter: String, CaseIterable, Identifiable, Codable {
     case sepia = "Sepia"
     case noir = "Noir"
     case vintage = "Vintage"
+    case chrome = "Chrome"
 
     var id: String { rawValue }
 
@@ -36,6 +104,8 @@ enum CameraFilter: String, CaseIterable, Identifiable, Codable {
             return "CIPhotoEffectNoir"
         case .vintage:
             return "CIPhotoEffectTransfer"
+        case .chrome:
+            return "CIPhotoEffectChrome"
         }
     }
 
@@ -46,6 +116,7 @@ enum CameraFilter: String, CaseIterable, Identifiable, Codable {
         case .sepia: return "sun.amber.fill"
         case .noir: return "moon.stars.fill"
         case .vintage: return "camera.filters"
+        case .chrome: return "slider.horizontal.2.square"
         }
     }
 
@@ -56,6 +127,7 @@ enum CameraFilter: String, CaseIterable, Identifiable, Codable {
         case .sepia: return "Warm Sepia"
         case .noir: return "Noir Dark"
         case .vintage: return "Retro Vintage"
+        case .chrome: return "Cool Chrome"
         }
     }
 
@@ -71,6 +143,8 @@ enum CameraFilter: String, CaseIterable, Identifiable, Codable {
             return [Color.black, Color.gray.opacity(0.6), Color.black]
         case .vintage:
             return [Color.purple.opacity(0.8), Color.orange.opacity(0.8), Color.teal.opacity(0.8)]
+        case .chrome:
+            return [Color.blue.opacity(0.8), Color.cyan, Color.white.opacity(0.8)]
         }
     }
 }
@@ -78,10 +152,16 @@ enum CameraFilter: String, CaseIterable, Identifiable, Codable {
 struct SoundSnapshot: Equatable, Sendable {
     let timeOffset: TimeInterval
     let currentDBFS: Double
+    let currentAcousticDB: Double
     let averageDBFS: Double
+    let averageAcousticDB: Double
     let minimumDBFS: Double
+    let minimumAcousticDB: Double
     let maximumDBFS: Double
+    let maximumAcousticDB: Double
     let peakDBFS: Double
+    let peakAcousticDB: Double
+    let durationFormatted: String
     let timestamp: Date
 }
 
@@ -111,71 +191,198 @@ enum CameraServiceError: LocalizedError {
     }
 }
 
+// MARK: - Location Manager
+
+final class CameraLocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
+    @Published var locationName: String?
+    @Published var authorizationStatus: CLAuthorizationStatus = .notDetermined
+
+    private let clManager = CLLocationManager()
+    private let geocoder = CLGeocoder()
+    private var isRequesting = false
+
+    override init() {
+        super.init()
+        clManager.delegate = self
+        clManager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        authorizationStatus = clManager.authorizationStatus
+    }
+
+    func requestPermissionIfNeeded() {
+        let status = clManager.authorizationStatus
+        if status == .notDetermined {
+            clManager.requestWhenInUseAuthorization()
+        } else if status == .authorizedWhenInUse || status == .authorizedAlways {
+            fetchLocation()
+        }
+    }
+
+    func fetchLocation() {
+        guard !isRequesting else { return }
+        isRequesting = true
+        clManager.requestLocation()
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        DispatchQueue.main.async {
+            self.authorizationStatus = manager.authorizationStatus
+        }
+        if manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways {
+            fetchLocation()
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        isRequesting = false
+        guard let location = locations.last else { return }
+
+        geocoder.reverseGeocodeLocation(location) { [weak self] placemarks, _ in
+            guard let self, let place = placemarks?.first else { return }
+            var components: [String] = []
+            if let locality = place.locality {
+                components.append(locality)
+            }
+            if let state = place.administrativeArea {
+                components.append(state)
+            } else if let country = place.country {
+                components.append(country)
+            }
+            let name = components.joined(separator: ", ")
+            DispatchQueue.main.async {
+                self.locationName = name.isEmpty ? nil : name
+            }
+        }
+    }
+
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        isRequesting = false
+    }
+}
+
 // MARK: - Overlay Renderer
 
 enum OverlayRenderer {
 
+    static func cropImageToAspectRatio(_ image: UIImage, targetRatio: CameraAspectRatio) -> UIImage {
+        guard let cgImage = image.cgImage else { return image }
+
+        let width = CGFloat(cgImage.width)
+        let height = CGFloat(cgImage.height)
+
+        let isPortrait = height >= width
+        let desiredRatio: CGFloat = isPortrait ? targetRatio.widthRatio : (1.0 / targetRatio.widthRatio)
+        let currentRatio = width / height
+
+        if abs(currentRatio - desiredRatio) < 0.02 {
+            return image
+        }
+
+        var newWidth = width
+        var newHeight = height
+
+        if currentRatio > desiredRatio {
+            newWidth = height * desiredRatio
+        } else {
+            newHeight = width / desiredRatio
+        }
+
+        let originX = (width - newWidth) / 2.0
+        let originY = (height - newHeight) / 2.0
+        let cropRect = CGRect(x: originX, y: originY, width: newWidth, height: newHeight)
+
+        guard let croppedCG = cgImage.cropping(to: cropRect) else {
+            return image
+        }
+
+        return UIImage(cgImage: croppedCG, scale: image.scale, orientation: image.imageOrientation)
+    }
+
     static func processCapturedPhoto(
         image: UIImage,
+        aspectRatio: CameraAspectRatio,
         currentDBFS: Double,
+        currentAcousticDB: Double,
         averageDBFS: Double,
+        averageAcousticDB: Double,
         minimumDBFS: Double,
+        minimumAcousticDB: Double,
         maximumDBFS: Double,
+        maximumAcousticDB: Double,
         peakDBFS: Double,
+        peakAcousticDB: Double,
+        durationFormatted: String,
+        locationName: String?,
         filter: CameraFilter,
         settings: OverlaySettings,
         timestamp: Date = Date()
-    ) -> UIImage {
+    ) -> (annotated: UIImage, raw: UIImage) {
 
-        var sourceImage = image
+        let croppedImage = cropImageToAspectRatio(image, targetRatio: aspectRatio)
+        var filteredImage = croppedImage
 
         if let ciFilterName = filter.ciFilterName,
-           let ciImage = CIImage(image: image) ?? image.ciImage {
+           let ciImage = CIImage(image: croppedImage) ?? croppedImage.ciImage {
             let context = CIContext()
             if let filterObj = CIFilter(name: ciFilterName) {
                 filterObj.setValue(ciImage, forKey: kCIInputImageKey)
                 if let outputCI = filterObj.outputImage,
                    let cgImage = context.createCGImage(outputCI, from: outputCI.extent) {
-                    sourceImage = UIImage(cgImage: cgImage, scale: image.scale, orientation: image.imageOrientation)
+                    filteredImage = UIImage(cgImage: cgImage, scale: croppedImage.scale, orientation: croppedImage.imageOrientation)
                 }
             }
         }
 
         let format = UIGraphicsImageRendererFormat()
-        format.scale = sourceImage.scale
+        format.scale = filteredImage.scale
         format.opaque = true
 
-        let renderer = UIGraphicsImageRenderer(size: sourceImage.size, format: format)
+        let renderer = UIGraphicsImageRenderer(size: filteredImage.size, format: format)
 
-        return renderer.image { context in
+        let annotatedImage = renderer.image { context in
             let cgContext = context.cgContext
-            let bounds = CGRect(origin: .zero, size: sourceImage.size)
+            let bounds = CGRect(origin: .zero, size: filteredImage.size)
 
-            sourceImage.draw(in: bounds)
+            filteredImage.draw(in: bounds)
 
             drawOverlay(
                 in: cgContext,
                 bounds: bounds,
                 currentDBFS: currentDBFS,
+                currentAcousticDB: currentAcousticDB,
                 averageDBFS: averageDBFS,
+                averageAcousticDB: averageAcousticDB,
                 minimumDBFS: minimumDBFS,
+                minimumAcousticDB: minimumAcousticDB,
                 maximumDBFS: maximumDBFS,
+                maximumAcousticDB: maximumAcousticDB,
                 peakDBFS: peakDBFS,
+                peakAcousticDB: peakAcousticDB,
+                durationFormatted: durationFormatted,
+                locationName: locationName,
                 filter: filter,
                 settings: settings,
                 timestamp: timestamp
             )
         }
+
+        return (annotated: annotatedImage, raw: filteredImage)
     }
 
     static func drawOverlay(
         in context: CGContext,
         bounds: CGRect,
         currentDBFS: Double,
+        currentAcousticDB: Double,
         averageDBFS: Double,
+        averageAcousticDB: Double,
         minimumDBFS: Double,
+        minimumAcousticDB: Double,
         maximumDBFS: Double,
+        maximumAcousticDB: Double,
         peakDBFS: Double,
+        peakAcousticDB: Double,
+        durationFormatted: String,
+        locationName: String?,
         filter: CameraFilter,
         settings: OverlaySettings,
         timestamp: Date
@@ -216,8 +423,14 @@ enum OverlayRenderer {
             )
         }
 
+        let savedWeighting = UserDefaults.standard.string(forKey: "defaultWeighting") ?? "A"
+        let weightingUnit = FrequencyWeighting(rawValue: savedWeighting)?.unitSymbol ?? "dBA"
+
         if settings.showSoundLevel {
-            let dbValueString = String(format: "%.1f", currentDBFS)
+            let displayVal = settings.useAcousticScale ? currentAcousticDB : currentDBFS
+            let unitString = settings.useAcousticScale ? weightingUnit : "dBFS"
+            let dbValueString = String(format: "%.1f", displayVal)
+
             let largeFont = UIFont.systemFont(ofSize: 52.0 * scale, weight: .ultraLight)
             let unitFont = UIFont.systemFont(ofSize: 18.0 * scale, weight: .regular)
             let subtitleFont = UIFont.systemFont(ofSize: 10.0 * scale, weight: .semibold)
@@ -236,9 +449,6 @@ enum OverlayRenderer {
                 .kern: 1.2 * scale
             ]
 
-            let weightingCode = UserDefaults.standard.string(forKey: "defaultWeighting") ?? "Z"
-            let unitString = FrequencyWeighting(rawValue: weightingCode)?.unitSymbol ?? "dBFS"
-
             let numberSize = (dbValueString as NSString).size(withAttributes: numberAttrs)
             let unitSize = (unitString as NSString).size(withAttributes: unitAttrs)
 
@@ -246,7 +456,10 @@ enum OverlayRenderer {
             let dbY = padding
 
             (dbValueString as NSString).draw(at: CGPoint(x: dbX, y: dbY), withAttributes: numberAttrs)
-            (unitString as NSString).draw(at: CGPoint(x: dbX + numberSize.width + (4.0 * scale), y: dbY + numberSize.height - unitSize.height - (4.0 * scale)), withAttributes: unitAttrs)
+            (unitString as NSString).draw(
+                at: CGPoint(x: dbX + numberSize.width + (4.0 * scale), y: dbY + numberSize.height - unitSize.height - (4.0 * scale)),
+                withAttributes: unitAttrs
+            )
 
             let subY = dbY + numberSize.height + (2.0 * scale)
             ("LIVE SOUND LEVEL" as NSString).draw(at: CGPoint(x: dbX, y: subY), withAttributes: subtitleAttrs)
@@ -259,12 +472,23 @@ enum OverlayRenderer {
                 .foregroundColor: UIColor.white
             ]
 
-            let lines = [
-                String(format: "AVG: %.1f", averageDBFS),
-                String(format: "MIN: %.1f", minimumDBFS),
-                String(format: "MAX: %.1f", maximumDBFS),
-                String(format: "PEAK: %.1f", peakDBFS)
-            ]
+            var lines: [String] = []
+            if settings.showAverage {
+                let v = settings.useAcousticScale ? averageAcousticDB : averageDBFS
+                lines.append(String(format: "AVG: %.1f", v))
+            }
+            if settings.showMinimum {
+                let v = settings.useAcousticScale ? minimumAcousticDB : minimumDBFS
+                lines.append(String(format: "MIN: %.1f", v))
+            }
+            if settings.showMaximum {
+                let v = settings.useAcousticScale ? maximumAcousticDB : maximumDBFS
+                lines.append(String(format: "MAX: %.1f", v))
+            }
+            if settings.showPeak {
+                let v = settings.useAcousticScale ? peakAcousticDB : peakDBFS
+                lines.append(String(format: "PEAK: %.1f", v))
+            }
 
             var currentY = padding
             for line in lines {
@@ -302,6 +526,8 @@ enum OverlayRenderer {
             )
         }
 
+        var bottomTrailingY = height - padding
+
         if settings.showTimestamp {
             let timeFont = UIFont.systemFont(ofSize: 12.0 * scale, weight: .medium)
             let dateFont = UIFont.systemFont(ofSize: 11.0 * scale, weight: .regular)
@@ -328,12 +554,38 @@ enum OverlayRenderer {
             let dateSize = (dateStr as NSString).size(withAttributes: dateAttrs)
 
             let dateX = width - padding - dateSize.width
-            let dateY = height - padding - dateSize.height
-            (dateStr as NSString).draw(at: CGPoint(x: dateX, y: dateY), withAttributes: dateAttrs)
+            bottomTrailingY -= dateSize.height
+            (dateStr as NSString).draw(at: CGPoint(x: dateX, y: bottomTrailingY), withAttributes: dateAttrs)
 
+            bottomTrailingY -= (timeSize.height + (2.0 * scale))
             let timeX = width - padding - timeSize.width
-            let timeY = dateY - timeSize.height - (2.0 * scale)
-            (timeStr as NSString).draw(at: CGPoint(x: timeX, y: timeY), withAttributes: timeAttrs)
+            (timeStr as NSString).draw(at: CGPoint(x: timeX, y: bottomTrailingY), withAttributes: timeAttrs)
+        }
+
+        if settings.showLocation, let loc = locationName, !loc.isEmpty {
+            let locFont = UIFont.systemFont(ofSize: 11.0 * scale, weight: .medium)
+            let locAttrs: [NSAttributedString.Key: Any] = [
+                .font: locFont,
+                .foregroundColor: UIColor(red: 0.0, green: 0.78, blue: 0.98, alpha: 1.0)
+            ]
+            let locStr = "📍 \(loc)"
+            let locSize = (locStr as NSString).size(withAttributes: locAttrs)
+            bottomTrailingY -= (locSize.height + (4.0 * scale))
+            let locX = width - padding - locSize.width
+            (locStr as NSString).draw(at: CGPoint(x: locX, y: bottomTrailingY), withAttributes: locAttrs)
+        }
+
+        if settings.showDuration && !durationFormatted.isEmpty {
+            let durFont = UIFont.monospacedSystemFont(ofSize: 11.0 * scale, weight: .semibold)
+            let durAttrs: [NSAttributedString.Key: Any] = [
+                .font: durFont,
+                .foregroundColor: UIColor.white
+            ]
+            let durStr = "REC \(durationFormatted)"
+            let durSize = (durStr as NSString).size(withAttributes: durAttrs)
+            bottomTrailingY -= (durSize.height + (4.0 * scale))
+            let durX = width - padding - durSize.width
+            (durStr as NSString).draw(at: CGPoint(x: durX, y: bottomTrailingY), withAttributes: durAttrs)
         }
 
         context.restoreGState()
@@ -368,6 +620,7 @@ final class VideoOverlayExporter {
         filter: CameraFilter,
         overlaySettings: OverlaySettings,
         recordingStartDate: Date,
+        locationName: String?,
         progress: ((Double) -> Void)? = nil,
         completion: @escaping (Result<URL, Error>) -> Void
     ) {
@@ -536,15 +789,26 @@ final class VideoOverlayExporter {
                             ) {
                                 let snapshot = self.findSnapshot(at: timeInSeconds, in: snapshots)
                                 let frameDate = recordingStartDate.addingTimeInterval(timeInSeconds)
+                                let minutes = Int(timeInSeconds) / 60
+                                let seconds = Int(timeInSeconds) % 60
+                                let tenths = Int((timeInSeconds.truncatingRemainder(dividingBy: 1.0)) * 10)
+                                let durationStr = String(format: "%02d:%02d.%01d", minutes, seconds, tenths)
 
                                 OverlayRenderer.drawOverlay(
                                     in: cgContext,
                                     bounds: CGRect(x: 0, y: 0, width: renderWidth, height: renderHeight),
                                     currentDBFS: snapshot?.currentDBFS ?? -120.0,
+                                    currentAcousticDB: snapshot?.currentAcousticDB ?? 30.0,
                                     averageDBFS: snapshot?.averageDBFS ?? -120.0,
+                                    averageAcousticDB: snapshot?.averageAcousticDB ?? 30.0,
                                     minimumDBFS: snapshot?.minimumDBFS ?? -120.0,
+                                    minimumAcousticDB: snapshot?.minimumAcousticDB ?? 30.0,
                                     maximumDBFS: snapshot?.maximumDBFS ?? -120.0,
+                                    maximumAcousticDB: snapshot?.maximumAcousticDB ?? 30.0,
                                     peakDBFS: snapshot?.peakDBFS ?? -120.0,
+                                    peakAcousticDB: snapshot?.peakAcousticDB ?? 30.0,
+                                    durationFormatted: durationStr,
+                                    locationName: locationName,
                                     filter: filter,
                                     settings: overlaySettings,
                                     timestamp: frameDate
@@ -634,28 +898,42 @@ final class CameraService: NSObject, ObservableObject {
 
     @Published private(set) var isConfigured = false
     @Published private(set) var isRecording = false
+    @Published private(set) var recordingDuration: TimeInterval = 0.0
     @Published private(set) var isExportingVideo = false
     @Published private(set) var exportProgress: Double = 0.0
-    @Published private(set) var isFlashEnabled = false
+    @Published private(set) var flashMode: CameraFlashMode = .auto
+    @Published private(set) var isFlashAvailable = true
     @Published private(set) var isUsingFrontCamera = false
     @Published private(set) var permissionDenied = false
+    @Published private(set) var isInterrupted = false
 
-    @Published var capturedImage: UIImage?
+    @Published var aspectRatio: CameraAspectRatio = .ratio4_3
+    @Published var selectedFilter: CameraFilter = .original
+    @Published var overlaySettings: OverlaySettings = OverlaySettings.load() {
+        didSet {
+            overlaySettings.save()
+        }
+    }
+
+    @Published var capturedAnnotatedImage: UIImage?
+    @Published var capturedRawImage: UIImage?
     @Published var savedVideoURL: URL?
     @Published var errorMessage: String?
 
-    // MARK: - Filter & Overlay Settings
+    // MARK: - Location & Sound Measurements
 
-    @Published var selectedFilter: CameraFilter = .original
-    @Published var overlaySettings: OverlaySettings = OverlaySettings()
+    @Published var locationService = CameraLocationManager()
 
-    // MARK: - Sound Measurement State
-
-    @Published private(set) var currentDBFS = -120.0
-    @Published private(set) var averageDBFS = -120.0
-    @Published private(set) var minimumDBFS = -120.0
-    @Published private(set) var maximumDBFS = -120.0
-    @Published private(set) var peakDBFS = -120.0
+    @Published private(set) var currentDBFS: Double = -120.0
+    @Published private(set) var currentAcousticDB: Double = 30.0
+    @Published private(set) var averageDBFS: Double = -120.0
+    @Published private(set) var averageAcousticDB: Double = 30.0
+    @Published private(set) var minimumDBFS: Double = -120.0
+    @Published private(set) var minimumAcousticDB: Double = 30.0
+    @Published private(set) var maximumDBFS: Double = -120.0
+    @Published private(set) var maximumAcousticDB: Double = 30.0
+    @Published private(set) var peakDBFS: Double = -120.0
+    @Published private(set) var peakAcousticDB: Double = 30.0
 
     // MARK: - Audio Engine Integration
 
@@ -681,20 +959,48 @@ final class CameraService: NSObject, ObservableObject {
     private var measurements: [Double] = []
     private var recordedSnapshots: [SoundSnapshot] = []
     private var recordingStartDate: Date?
+    private var recordingTimer: Timer?
 
     private var videoOutputURL: URL?
     private let maximumMeasurementCount = 3600
 
+    var recordingDurationFormatted: String {
+        let total = recordingDuration
+        let minutes = Int(total) / 60
+        let seconds = Int(total) % 60
+        let tenths = Int((total.truncatingRemainder(dividingBy: 1.0)) * 10)
+        return String(format: "%02d:%02d.%01d", minutes, seconds, tenths)
+    }
+
     override init() {
         super.init()
         setupAudioCapture()
+        setupInterruptionObservers()
     }
 
     private func setupAudioCapture() {
-        let savedWeighting = UserDefaults.standard.string(forKey: "defaultWeighting") ?? "Z"
-        audioCaptureService.weighting = FrequencyWeighting(rawValue: savedWeighting) ?? .z
+        let savedWeighting = UserDefaults.standard.string(forKey: "defaultWeighting") ?? "A"
+        audioCaptureService.weighting = FrequencyWeighting(rawValue: savedWeighting) ?? .a
         audioCaptureService.onLevel = { [weak self] level, _ in
             self?.updateSoundLevel(level)
+        }
+    }
+
+    private func setupInterruptionObservers() {
+        NotificationCenter.default.addObserver(
+            forName: AVCaptureSession.wasInterruptedNotification,
+            object: session,
+            queue: .main
+        ) { [weak self] _ in
+            self?.isInterrupted = true
+        }
+
+        NotificationCenter.default.addObserver(
+            forName: AVCaptureSession.interruptionEndedNotification,
+            object: session,
+            queue: .main
+        ) { [weak self] _ in
+            self?.isInterrupted = false
         }
     }
 
@@ -832,6 +1138,7 @@ final class CameraService: NSObject, ObservableObject {
 
         DispatchQueue.main.async {
             self.isConfigured = true
+            self.isFlashAvailable = device.hasFlash
         }
 
         startSessionIfNeeded()
@@ -854,10 +1161,14 @@ final class CameraService: NSObject, ObservableObject {
         audioCaptureTask?.cancel()
         audioCaptureTask = Task { [weak self] in
             guard let self else { return }
-            let saved = UserDefaults.standard.string(forKey: "defaultWeighting") ?? "Z"
-            self.audioCaptureService.weighting = FrequencyWeighting(rawValue: saved) ?? .z
+            let saved = UserDefaults.standard.string(forKey: "defaultWeighting") ?? "A"
+            self.audioCaptureService.weighting = FrequencyWeighting(rawValue: saved) ?? .a
             guard !Task.isCancelled else { return }
             try? await self.audioCaptureService.start()
+        }
+
+        if overlaySettings.showLocation {
+            locationService.requestPermissionIfNeeded()
         }
     }
 
@@ -875,6 +1186,7 @@ final class CameraService: NSObject, ObservableObject {
         audioCaptureTask?.cancel()
         audioCaptureTask = nil
         audioCaptureService.stop()
+        stopRecordingTimer()
 
         sessionQueue.async { [weak self] in
             guard let self else { return }
@@ -894,6 +1206,7 @@ final class CameraService: NSObject, ObservableObject {
     deinit {
         audioCaptureTask?.cancel()
         audioCaptureService.stop()
+        stopRecordingTimer()
         if session.isRunning {
             session.stopRunning()
         }
@@ -907,7 +1220,11 @@ final class CameraService: NSObject, ObservableObject {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
 
+            let offset = UserDefaults.standard.double(forKey: "microphoneGainOffset")
+            let acoustic = max(20.0, min(130.0, level + 100.0 + offset))
+
             self.currentDBFS = level
+            self.currentAcousticDB = acoustic
             self.measurements.append(level)
 
             if self.measurements.count > self.maximumMeasurementCount {
@@ -918,24 +1235,32 @@ final class CameraService: NSObject, ObservableObject {
 
             guard !self.measurements.isEmpty else { return }
 
-            self.averageDBFS = SoundLevelCalculator.energyAverageDBFS(self.measurements)
+            let avgDBFS = SoundLevelCalculator.energyAverageDBFS(self.measurements)
+            self.averageDBFS = avgDBFS
+            self.averageAcousticDB = max(20.0, min(130.0, avgDBFS + 100.0 + offset))
 
             if self.minimumDBFS == -120.0 {
                 self.minimumDBFS = level
+                self.minimumAcousticDB = acoustic
             } else {
                 self.minimumDBFS = min(self.minimumDBFS, level)
+                self.minimumAcousticDB = min(self.minimumAcousticDB, acoustic)
             }
 
             if self.maximumDBFS == -120.0 {
                 self.maximumDBFS = level
+                self.maximumAcousticDB = acoustic
             } else {
                 self.maximumDBFS = max(self.maximumDBFS, level)
+                self.maximumAcousticDB = max(self.maximumAcousticDB, acoustic)
             }
 
             if self.peakDBFS == -120.0 {
                 self.peakDBFS = level
+                self.peakAcousticDB = acoustic
             } else {
                 self.peakDBFS = max(self.peakDBFS, level)
+                self.peakAcousticDB = max(self.peakAcousticDB, acoustic)
             }
 
             if self.isRecording, let startDate = self.recordingStartDate {
@@ -943,10 +1268,16 @@ final class CameraService: NSObject, ObservableObject {
                 let snapshot = SoundSnapshot(
                     timeOffset: timeOffset,
                     currentDBFS: self.currentDBFS,
+                    currentAcousticDB: self.currentAcousticDB,
                     averageDBFS: self.averageDBFS,
+                    averageAcousticDB: self.averageAcousticDB,
                     minimumDBFS: self.minimumDBFS,
+                    minimumAcousticDB: self.minimumAcousticDB,
                     maximumDBFS: self.maximumDBFS,
+                    maximumAcousticDB: self.maximumAcousticDB,
                     peakDBFS: self.peakDBFS,
+                    peakAcousticDB: self.peakAcousticDB,
+                    durationFormatted: self.recordingDurationFormatted,
                     timestamp: Date.now
                 )
                 self.recordedSnapshots.append(snapshot)
@@ -958,10 +1289,15 @@ final class CameraService: NSObject, ObservableObject {
         DispatchQueue.main.async {
             self.measurements.removeAll()
             self.currentDBFS = -120.0
+            self.currentAcousticDB = 30.0
             self.averageDBFS = -120.0
+            self.averageAcousticDB = 30.0
             self.minimumDBFS = -120.0
+            self.minimumAcousticDB = 30.0
             self.maximumDBFS = -120.0
+            self.maximumAcousticDB = 30.0
             self.peakDBFS = -120.0
+            self.peakAcousticDB = 30.0
         }
     }
 
@@ -978,10 +1314,19 @@ final class CameraService: NSObject, ObservableObject {
 
             let settings = AVCapturePhotoSettings()
 
-            if let input = self.videoInput,
-               input.device.hasFlash,
-               self.isFlashEnabled {
-                settings.flashMode = .on
+            if let input = self.videoInput, input.device.hasFlash {
+                switch self.flashMode {
+                case .auto:
+                    if self.photoOutput.supportedFlashModes.contains(.auto) {
+                        settings.flashMode = .auto
+                    }
+                case .on:
+                    if self.photoOutput.supportedFlashModes.contains(.on) {
+                        settings.flashMode = .on
+                    }
+                case .off:
+                    settings.flashMode = .off
+                }
             } else {
                 settings.flashMode = .off
             }
@@ -1009,10 +1354,18 @@ final class CameraService: NSObject, ObservableObject {
 
             self.videoOutputURL = url
 
+            if let input = self.videoInput, input.device.hasTorch, self.flashMode == .on {
+                try? input.device.lockForConfiguration()
+                try? input.device.setTorchModeOn(level: 1.0)
+                input.device.unlockForConfiguration()
+            }
+
             DispatchQueue.main.async {
                 self.recordedSnapshots.removeAll()
                 self.recordingStartDate = Date()
+                self.recordingDuration = 0.0
                 self.isRecording = true
+                self.startRecordingTimer()
             }
 
             self.movieOutput.startRecording(
@@ -1025,11 +1378,31 @@ final class CameraService: NSObject, ObservableObject {
     func stopRecording() {
         sessionQueue.async { [weak self] in
             guard let self, self.movieOutput.isRecording else { return }
+
+            if let input = self.videoInput, input.device.hasTorch, input.device.torchMode == .on {
+                try? input.device.lockForConfiguration()
+                input.device.torchMode = .off
+                input.device.unlockForConfiguration()
+            }
+
             self.movieOutput.stopRecording()
         }
     }
 
-    // MARK: - Camera Switching & Flash
+    private func startRecordingTimer() {
+        recordingTimer?.invalidate()
+        recordingTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+            guard let self, let start = self.recordingStartDate else { return }
+            self.recordingDuration = Date.now.timeIntervalSince(start)
+        }
+    }
+
+    private func stopRecordingTimer() {
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+    }
+
+    // MARK: - Camera Switching & Flash & Aspect Ratio
 
     func switchCamera() {
         sessionQueue.async { [weak self] in
@@ -1065,7 +1438,10 @@ final class CameraService: NSObject, ObservableObject {
 
                 DispatchQueue.main.async {
                     self.isUsingFrontCamera = nextPosition == .front
-                    self.isFlashEnabled = false
+                    self.isFlashAvailable = device.hasFlash
+                    if !device.hasFlash {
+                        self.flashMode = .off
+                    }
                 }
             } catch {
                 self.publishError(error)
@@ -1073,83 +1449,80 @@ final class CameraService: NSObject, ObservableObject {
         }
     }
 
-    func toggleFlash() {
-        sessionQueue.async { [weak self] in
-            guard let self,
-                  let device = self.videoInput?.device,
-                  device.hasTorch else {
-                self?.publishError(CameraServiceError.torchUnavailable)
-                return
-            }
+    func cycleFlashMode() {
+        guard isFlashAvailable else { return }
+        switch flashMode {
+        case .auto:
+            flashMode = .on
+        case .on:
+            flashMode = .off
+        case .off:
+            flashMode = .auto
+        }
+    }
 
-            let enable = !self.isFlashEnabled
+    func setFlashMode(_ mode: CameraFlashMode) {
+        guard isFlashAvailable else { return }
+        flashMode = mode
+    }
 
-            do {
-                try device.lockForConfiguration()
-
-                if enable {
-                    try device.setTorchModeOn(level: 1.0)
-                } else {
-                    device.torchMode = .off
-                }
-
-                device.unlockForConfiguration()
-
-                DispatchQueue.main.async {
-                    self.isFlashEnabled = enable
-                }
-            } catch {
-                self.publishError(error)
-            }
+    func cycleAspectRatio() {
+        switch aspectRatio {
+        case .ratio4_3:
+            aspectRatio = .ratio16_9
+        case .ratio16_9:
+            aspectRatio = .ratio1_1
+        case .ratio1_1:
+            aspectRatio = .ratio4_3
         }
     }
 
     // MARK: - Save Media
 
-    func saveCapturedPhoto() {
-        guard let image = capturedImage else { return }
-
-        saveToPhotoLibrary {
+    func savePhoto(_ image: UIImage, completion: @escaping (Bool) -> Void) {
+        saveToPhotoLibrary(changes: {
             PHAssetChangeRequest.creationRequestForAsset(from: image)
-        }
+        }, completion: completion)
     }
 
-    func saveRecordedVideo() {
-        guard let url = savedVideoURL else { return }
-
-        saveToPhotoLibrary {
+    func saveVideo(url: URL, completion: @escaping (Bool) -> Void) {
+        saveToPhotoLibrary(changes: {
             PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
-        }
+        }, completion: completion)
     }
 
-    private func saveToPhotoLibrary(changes: @escaping () -> Void) {
+    private func saveToPhotoLibrary(changes: @escaping () -> Void, completion: @escaping (Bool) -> Void) {
         let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
 
-        let save: () -> Void = {
+        let performSave: () -> Void = { [weak self] in
             PHPhotoLibrary.shared().performChanges {
                 changes()
             } completionHandler: { [weak self] success, error in
-                guard let self else { return }
                 DispatchQueue.main.async {
                     if !success {
-                        self.errorMessage = error?.localizedDescription ?? "Unable to save media to Photos."
+                        self?.errorMessage = error?.localizedDescription ?? "Unable to save media to Photos."
                     }
+                    completion(success)
                 }
             }
         }
 
         if status == .authorized || status == .limited {
-            save()
+            performSave()
         } else if status == .notDetermined {
-            PHPhotoLibrary.requestAuthorization(for: .addOnly) { newStatus in
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { [weak self] newStatus in
                 if newStatus == .authorized || newStatus == .limited {
-                    save()
+                    performSave()
                 } else {
-                    self.publishError(CameraServiceError.permissionDenied)
+                    DispatchQueue.main.async {
+                        self?.publishError(CameraServiceError.permissionDenied)
+                        completion(false)
+                    }
                 }
             }
         } else {
             publishError(CameraServiceError.permissionDenied)
+            completion(false)
         }
     }
 
@@ -1184,18 +1557,29 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
 
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            let processedImage = OverlayRenderer.processCapturedPhoto(
+
+            let result = OverlayRenderer.processCapturedPhoto(
                 image: rawImage,
+                aspectRatio: self.aspectRatio,
                 currentDBFS: self.currentDBFS,
+                currentAcousticDB: self.currentAcousticDB,
                 averageDBFS: self.averageDBFS,
+                averageAcousticDB: self.averageAcousticDB,
                 minimumDBFS: self.minimumDBFS,
+                minimumAcousticDB: self.minimumAcousticDB,
                 maximumDBFS: self.maximumDBFS,
+                maximumAcousticDB: self.maximumAcousticDB,
                 peakDBFS: self.peakDBFS,
+                peakAcousticDB: self.peakAcousticDB,
+                durationFormatted: self.recordingDurationFormatted,
+                locationName: self.locationService.locationName,
                 filter: self.selectedFilter,
                 settings: self.overlaySettings,
                 timestamp: Date()
             )
-            self.capturedImage = processedImage
+
+            self.capturedAnnotatedImage = result.annotated
+            self.capturedRawImage = result.raw
         }
     }
 }
@@ -1213,6 +1597,7 @@ extension CameraService: AVCaptureFileOutputRecordingDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.isRecording = false
+            self.stopRecordingTimer()
 
             if let error {
                 self.publishError(error)
@@ -1229,6 +1614,7 @@ extension CameraService: AVCaptureFileOutputRecordingDelegate {
             let filter = self.selectedFilter
             let settings = self.overlaySettings
             let startDate = self.recordingStartDate ?? Date()
+            let locName = self.locationService.locationName
 
             VideoOverlayExporter.exportVideo(
                 inputURL: outputFileURL,
@@ -1237,6 +1623,7 @@ extension CameraService: AVCaptureFileOutputRecordingDelegate {
                 filter: filter,
                 overlaySettings: settings,
                 recordingStartDate: startDate,
+                locationName: locName,
                 progress: { [weak self] prog in
                     DispatchQueue.main.async {
                         self?.exportProgress = prog

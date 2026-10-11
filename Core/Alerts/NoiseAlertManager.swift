@@ -2,6 +2,7 @@ import Foundation
 import UserNotifications
 
 final class NoiseAlertManager {
+    static let shared = NoiseAlertManager()
     private var wasAboveThreshold = false
 
     func evaluate(level: Double, threshold: Double, enabled: Bool) {

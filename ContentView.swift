@@ -35,9 +35,15 @@ struct RootTabView: View {
     var body: some View {
         ZStack(alignment: .bottom) {
             TabView(selection: $selectedTab) {
-                NavigationStack { CameraView() }
-                    .tag(AppTab.camera)
-                    .toolbar(.hidden, for: .tabBar)
+                NavigationStack {
+                    CameraView(onClose: {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            selectedTab = .meter
+                        }
+                    })
+                }
+                .tag(AppTab.camera)
+                .toolbar(.hidden, for: .tabBar)
 
                 NavigationStack { DosimeterView() }
                     .tag(AppTab.dosimeter)
@@ -57,10 +63,19 @@ struct RootTabView: View {
             }
             .ignoresSafeArea(edges: .bottom)
 
+            .onReceive(NotificationCenter.default.publisher(for: .switchToMeterTab)) { _ in
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    selectedTab = .meter
+                }
+            }
+
             // Custom Floating Dark Pill Bottom Navigation Bar matching screenshot
-            CustomBottomTabBar(selectedTab: $selectedTab)
-                .padding(.horizontal, 16)
-                .padding(.bottom, 6)
+            if selectedTab != .camera {
+                CustomBottomTabBar(selectedTab: $selectedTab)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .fullScreenCover(isPresented: Binding(
             get: { !hasCompletedOnboarding },
@@ -182,4 +197,9 @@ struct SpectrumView: View {
             Button("OK", role: .cancel) { model.errorMessage = nil }
         } message: { Text(model.errorMessage ?? "") }
     }
+}
+
+
+extension Notification.Name {
+    static let switchToMeterTab = Notification.Name("switchToMeterTab")
 }

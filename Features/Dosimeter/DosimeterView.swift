@@ -46,6 +46,9 @@ struct DosimeterView: View {
         .task {
             model.start()
         }
+        .onAppear {
+            model.reloadConfiguration()
+        }
         .onDisappear {
             model.stop()
         }
